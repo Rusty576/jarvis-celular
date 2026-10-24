@@ -1,0 +1,21 @@
+{
+  "name": "J.A.R.V.I.S.",
+  "short_name": "JARVIS",
+  "description": "Tu asistente JARVIS en el celular: charla, llamada con manos libres, tu día y tu PC.",
+  "lang": "es",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#02070d",
+  "theme_color": "#02070d",
+  "icons": [
+    {"src": "iconos/icono-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+    {"src": "iconos/icono-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+    {"src": "iconos/icono-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+  ],
+  "shortcuts": [
+    {"name": "Llamar a JARVIS", "short_name": "Llamar", "url": "./?llamar=1",
+     "icons": [{"src": "iconos/icono-192.png", "sizes": "192x192"}]}
+  ]
+}
