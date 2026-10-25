@@ -1,12 +1,12 @@
 // ============================================================
-//  El reactor de JARVIS para la llamada: el mismo dibujo que en la PC (interfaz/app.js, dibujarReactor), más
-//  liviano. Se dibuja solo mientras la llamada está abierta.
-//  Reactor.estado("escuchando" | "pensando" | "hablando" | "libre") cambia cómo se mueve;
-//  Reactor.voz(0 a 1) dice cuánto se oye (las ondas cuando hablás).
+//  El reactor de JARVIS: el mismo dibujo que en la PC (interfaz/app.js, dibujarReactor), más liviano. Hay uno en
+//  Inicio y otro en la llamada (crearReactor(canvas) arma cada uno); se dibuja solo mientras se ve.
+//  .estado("escuchando" | "pensando" | "hablando" | "libre") cambia cómo se mueve;
+//  .voz(0 a 1) dice cuánto se oye (las ondas cuando hablás).
 // ============================================================
 "use strict";
 
-const Reactor = (() => {
+function crearReactor(canvasInicial) {
   const BARRAS = 64;
   const alturas = new Float32Array(BARRAS);
   const particulas = Array.from({length: 14}, () => ({
@@ -203,12 +203,10 @@ const Reactor = (() => {
     if (ancho && alto) dibujar(ms / 1000);
   }
 
+  lienzo = canvasInicial;
+  ctx = lienzo.getContext("2d");
+  new ResizeObserver(ajustar).observe(lienzo);
   return {
-    iniciar(canvas) {
-      lienzo = canvas;
-      ctx = canvas.getContext("2d");
-      new ResizeObserver(ajustar).observe(canvas);
-    },
     prender() {
       if (corriendo) return;
       corriendo = true;
@@ -219,4 +217,4 @@ const Reactor = (() => {
     estado(nuevo) { estado = nuevo; },
     voz(nivel) { voz = Math.max(voz, nivel); },
   };
-})();
+}

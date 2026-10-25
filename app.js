@@ -3,15 +3,17 @@
 // ------------------------------------------------------------
 //  Una página web que se instala como una app (PWA). Le habla al bot de JARVIS (bot_celular/Codigo.gs, en Google
 //  Apps Script): el mismo cerebro (Gemini), tus pendientes, recordatorios, mails y órdenes para la PC, y la misma
-//  charla que Telegram.
+//  charla que Telegram. Puede ser tu JARVIS o el de otra persona (cada uno con su bot, su llave y sus datos).
 //  La dirección del bot y la llave llegan en el link que manda /app en Telegram, después del # (esa parte del link
 //  no viaja a ningún servidor), y quedan guardadas solo en este celular.
 //  La voz: el celular escucha (el reconocimiento de voz de Chrome) y habla (las voces del celular). Si no puede
 //  escuchar solo, graba y el bot pasa la grabación a texto.
+//  Lo que se hace en el celular (abrir una app, poner música, preparar un WhatsApp o una llamada) lo pide el bot como
+//  "acciones" y lo hace esta página.
 // ============================================================
 "use strict";
 
-const VERSION_APP = "2026.10.24";
+const VERSION_APP = "2026.10.24.2";
 const $ = (id) => document.getElementById(id);
 const Reco = window.SpeechRecognition || window.webkitSpeechRecognition;
 
@@ -31,15 +33,23 @@ function guardar(clave, valor) {
   } catch (e) { /* sin lugar: la app sigue andando */ }
 }
 
-const ajustes = Object.assign({leer: "auto", nombreVoz: "", velocidad: 1.05, idioma: "es-UY"}, leerGuardado("ajustes", {}));
+const ajustes = Object.assign({leer: "auto", nombreVoz: "", velocidad: 1.05, idioma: "es-UY", musica: "youtube",
+                               escucharJarvis: false}, leerGuardado("ajustes", {}));
 let conexion = leerGuardado("conexion", null);         // {u: la dirección del bot, k: la llave}
 let mensajes = leerGuardado("mensajes", []);           // la charla, como se ve en este celular
 let ultimaCharla = leerGuardado("ultimaCharla", null); // el último mensaje de la charla del bot que ya está acá
 let datosDia = leerGuardado("dia", null);              // lo último de «Mi día» y la PC (se ve aunque no haya internet)
+let vistaActual = "inicio";
+let ultimoToque = 0;   // el celular solo deja abrir otra app justo después de que tocaste algo
 
 // Las órdenes rápidas de la pestaña PC (solo las que JARVIS entiende en la PC)
 const ORDENES = ["¿Cómo está la compu?", "Pausá la música", "Siguiente tema", "Modo juego", "Salí del modo juego",
                  "Bloqueá la pantalla", "Sacá una captura de pantalla", "Apagá la compu en 10 minutos", "Cancelá el apagado"];
+
+const normalizar = (t) => String(t || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
+  .replace(/[^\w\s]/g, " ").replace(/\s+/g, " ").trim();
+const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
+const tienePc = () => !datosDia || datosDia.tiene_pc !== false;
 
 
 // ---------- Conectarse con el bot ----------
@@ -96,6 +106,15 @@ function avisar(texto, segundos = 3.5) {
   aviso.hidden = false;
   clearTimeout(avisar.reloj);
   avisar.reloj = setTimeout(() => { aviso.hidden = true; }, segundos * 1000);
+}
+
+
+// ---------- Los reactores (Inicio y la llamada) ----------
+
+let reactorInicio = null, reactorLlamada = null;
+function vozReactores(nivel) {
+  if (reactorInicio) reactorInicio.voz(nivel);
+  if (reactorLlamada) reactorLlamada.voz(nivel);
 }
 
 
@@ -179,12 +198,15 @@ if (window.speechSynthesis && speechSynthesis.addEventListener) speechSynthesis.
 
 const Oido = {
   rec: null,
+  fin: Promise.resolve(),   // se cumple cuando el reconocimiento que está andando termina del todo
 
   escuchar(alOir) {
     // Una frase: termina sola cuando dejás de hablar. Devuelve {texto, error}
     return new Promise((listo) => {
       const rec = new Reco();
       this.rec = rec;
+      let termino;
+      this.fin = new Promise((r) => { termino = r; });
       rec.lang = ajustes.idioma;
       rec.interimResults = true;
       rec.continuous = false;
@@ -197,13 +219,14 @@ const Oido = {
           if (e.results[i].isFinal) final += e.results[i][0].transcript;
           else parcial += e.results[i][0].transcript;
         }
-        Reactor.voz(0.7);
+        vozReactores(0.7);
         if (alOir) alOir((final + " " + parcial).trim());
       };
-      rec.onsoundstart = () => Reactor.voz(0.4);
+      rec.onsoundstart = () => vozReactores(0.4);
       rec.onerror = (e) => { error = e.error; };
       rec.onend = () => {
-        this.rec = null;
+        if (this.rec === rec) this.rec = null;   // (si ya arrancó otro, no lo pisa)
+        termino();
         if (error === "language-not-supported" && ajustes.idioma !== "es-ES") {   // ese español no está: el de España
           ajustes.idioma = "es-ES";
           guardar("ajustes", ajustes);
@@ -215,7 +238,8 @@ const Oido = {
       try {
         rec.start();
       } catch (e) {
-        this.rec = null;
+        if (this.rec === rec) this.rec = null;
+        termino();
         listo({texto: "", error: "no-arranca"});
       }
     });
@@ -229,6 +253,13 @@ const Oido = {
   cancelar() {   // termina sin entregar nada
     if (this.rec) try { this.rec.abort(); } catch (e) { /* ya terminó */ }
     Grabadora.cancelar();
+  },
+
+  async soltar() {
+    // Deja libre el micrófono antes de usarlo para otra cosa: corta lo que esté escuchando (por ejemplo, esperando
+    // «Jarvis») y espera a que termine del todo (si no, el viejo y el nuevo se pisan)
+    this.cancelar();
+    await Promise.race([this.fin, esperar(1500)]);
   },
 
   async oir(alOir) {
@@ -278,7 +309,7 @@ const Grabadora = {
         if (nivel > Math.max(0.02, ruido * 3)) {
           hablo = true;
           ultimoSonido = ahora;
-          Reactor.voz(Math.min(1, nivel * 8));
+          vozReactores(Math.min(1, nivel * 8));
         }
         if (hablo && ahora - ultimoSonido > 1300) terminar(true);              // dejaste de hablar
         else if (!hablo && ahora - inicio > 8000) terminar(false);             // no dijiste nada
@@ -321,6 +352,101 @@ function aBase64(bytes) {
 }
 
 
+// ---------- Lo que se hace en el celular: abrir apps, música, WhatsApp, llamadas ----------
+
+// Una página no puede abrir cualquier app por su nombre: estas sí (con su dirección o con un "intent" de Android).
+// Las demás se buscan en Play Store (si la tenés, ahí aparece «Abrir»)
+const lanzar = (paquete) => `intent://#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;`
+  + `package=${paquete};end`;
+const APPS = {
+  whatsapp: {nombre: "WhatsApp", url: "https://wa.me/", alias: ["wsp", "wasap", "whats"]},
+  youtube: {nombre: "YouTube", url: "https://www.youtube.com/", buscar: (q) => "https://www.youtube.com/results?search_query=" + q},
+  "youtube music": {nombre: "YouTube Music", url: "https://music.youtube.com/", buscar: (q) => "https://music.youtube.com/search?q=" + q},
+  spotify: {nombre: "Spotify", url: "spotify:", buscar: (q) => "spotify:search:" + q},
+  instagram: {nombre: "Instagram", url: "https://www.instagram.com/", alias: ["insta"]},
+  tiktok: {nombre: "TikTok", url: "https://www.tiktok.com/", alias: ["tik tok"]},
+  facebook: {nombre: "Facebook", url: "https://www.facebook.com/", alias: ["face"]},
+  netflix: {nombre: "Netflix", url: "https://www.netflix.com/"},
+  maps: {nombre: "Maps", url: "https://www.google.com/maps", alias: ["google maps", "mapas", "mapa", "gps"],
+         buscar: (q) => "https://www.google.com/maps/search/?api=1&query=" + q},
+  gmail: {nombre: "Gmail", url: lanzar("com.google.android.gm"), alias: ["correo", "mail", "mails"]},
+  telegram: {nombre: "Telegram", url: "tg://resolve", alias: []},
+  chrome: {nombre: "Chrome", url: lanzar("com.android.chrome"), alias: ["navegador", "google chrome"],
+           buscar: (q) => "https://www.google.com/search?q=" + q},
+  camara: {nombre: "Cámara", url: "intent:#Intent;action=android.media.action.STILL_IMAGE_CAMERA;end", alias: ["camera"]},
+  telefono: {nombre: "Teléfono", url: "tel:", alias: ["llamadas", "marcador"]},
+  mensajes: {nombre: "Mensajes", url: "sms:", alias: ["sms"]},
+  calculadora: {nombre: "Calculadora", url: lanzar("com.google.android.calculator"), alias: []},
+  calendario: {nombre: "Calendario", url: lanzar("com.google.android.calendar"), alias: ["agenda"]},
+  fotos: {nombre: "Fotos", url: lanzar("com.google.android.apps.photos"), alias: ["galeria", "google fotos"]},
+  reloj: {nombre: "Reloj", url: "intent:#Intent;action=android.intent.action.SHOW_ALARMS;end", alias: ["alarma", "alarmas"]},
+  ajustes: {nombre: "Ajustes", url: "intent:#Intent;action=android.settings.SETTINGS;end", alias: ["configuracion"]},
+  "play store": {nombre: "Play Store", url: "market://search?q=", alias: ["tienda"],
+                 buscar: (q) => "https://play.google.com/store/search?c=apps&q=" + q},
+};
+
+function appDe(nombre) {
+  const n = normalizar(nombre).replace(/^(?:la|el|mi|app de|aplicacion de|app)\s+/, "").trim();
+  if (APPS[n]) return Object.assign({clave: n}, APPS[n]);
+  for (const [clave, app] of Object.entries(APPS)) {
+    if ((app.alias || []).includes(n) || normalizar(app.nombre) === n) return Object.assign({clave: clave}, app);
+  }
+  return null;
+}
+
+function accionAUrl(a) {
+  // {texto del botón, url} de lo que pidió el bot
+  const q = encodeURIComponent(a.busqueda || "");
+  if (a.tipo === "whatsapp") {
+    const texto = encodeURIComponent(a.mensaje || "");
+    return {texto: `Abrir WhatsApp${a.para ? " (" + a.para + ")" : ""}`,
+            url: a.numero ? `https://wa.me/${a.numero}?text=${texto}` : `https://wa.me/?text=${texto}`};
+  }
+  if (a.tipo === "llamar") return {texto: `Llamar${a.para ? " a " + a.para : ""}`, url: "tel:" + a.numero};
+  if (a.tipo === "musica") {
+    const donde = {youtube: APPS.youtube, ytmusic: APPS["youtube music"], spotify: APPS.spotify}[ajustes.musica] || APPS.youtube;
+    return {texto: `Poner «${a.busqueda}» en ${donde.nombre}`, url: donde.buscar(q)};
+  }
+  const app = appDe(a.app);
+  if (!app) return {texto: `Buscar «${a.app}» en Play Store`, url: APPS["play store"].buscar(encodeURIComponent(a.app))};
+  return {texto: `Abrir ${app.nombre}`, url: a.busqueda && app.buscar ? app.buscar(q) : app.url};
+}
+
+function abrirUrl(url) {
+  if (/^https?:/.test(url)) window.open(url, "_blank", "noopener");   // la app la agarra (o se abre en Chrome)
+  else location.href = url;                                          // intent:, tel:, spotify:...
+}
+
+function intentarAbrir(accion) {
+  // Recién tocaste algo: el celular deja abrirla sola. Si no, queda el botón para tocar
+  if (Date.now() - ultimoToque < 4500) abrirUrl(accionAUrl(accion).url);
+}
+
+function pintarAcciones(contenedor, acciones) {
+  contenedor.innerHTML = "";
+  (acciones || []).forEach((a) => {
+    const {texto, url} = accionAUrl(a);
+    const boton = document.createElement("button");
+    boton.className = "accion";
+    boton.textContent = "▶ " + texto;
+    boton.onclick = () => abrirUrl(url);
+    contenedor.appendChild(boton);
+  });
+}
+
+// "abrí WhatsApp", "abrime la cámara": se hace al toque, sin preguntarle al bot
+const ABRIR = /^(?:jarvis\s+)?(?:abr[ie]\w*|entra(?:me)? a|anda a|pone(?:me)?|inicia)\s+(?:el |la |los |las |mi |el app de )?(.+)$/;
+
+function comandoLocal(texto) {
+  const m = ABRIR.exec(normalizar(texto));
+  const app = m && appDe(m[1]);
+  if (!app) return null;
+  const accion = {tipo: "abrir", app: app.clave};
+  abrirUrl(accionAUrl(accion).url);
+  return {texto: `Abriendo ${app.nombre}.`, acciones: [accion]};
+}
+
+
 // ---------- La charla ----------
 
 function escapar(texto) {
@@ -350,6 +476,12 @@ function pintarMensaje(m, indice) {
     img.className = "foto";
     img.src = m.imagen;
     div.appendChild(img);
+  }
+  if (m.acciones && m.acciones.length) {
+    const caja = document.createElement("div");
+    caja.className = "acciones";
+    pintarAcciones(caja, m.acciones);
+    div.appendChild(caja);
   }
   (m.tarjetas || []).forEach((t, i) => div.appendChild(pintarTarjeta(t, indice, i)));
   return div;
@@ -388,7 +520,7 @@ function pintarTarjeta(t, indiceMensaje, indiceTarjeta) {
     if (mensajes[indiceMensaje] && mensajes[indiceMensaje].tarjetas) mensajes[indiceMensaje].tarjetas[indiceTarjeta] = t;
     guardar("mensajes", mensajes);
     caja.replaceWith(pintarTarjeta(t, indiceMensaje, indiceTarjeta));
-    if (llamada.activa) Voz.decir(t.resultado);
+    if (llamada.activa || vistaActual === "inicio") Voz.decir(t.resultado);
   };
   si.onclick = () => responder(true);
   no.onclick = () => responder(false);
@@ -437,9 +569,14 @@ function pensando(si) {
 }
 
 async function mandar(texto, opciones = {}) {
-  // Le manda algo a JARVIS y muestra la respuesta. opciones: {foto, audio, llamada, porVoz}
+  // Le manda algo a JARVIS y muestra la respuesta. opciones: {foto, audio, llamada, porVoz, sinVoz}
   const foto = opciones.foto || null;
   const mio = agregar({quien: "vos", texto: texto || (opciones.audio ? "🎙️ ..." : ""), imagen: foto ? foto.miniatura : null});
+  const local = !foto && !opciones.audio && comandoLocal(texto);   // "abrí WhatsApp": al toque
+  if (local) {
+    agregar({quien: "jarvis", texto: local.texto, acciones: local.acciones});
+    return {texto: local.texto, tarjetas: [], acciones: local.acciones, local: true};
+  }
   pensando(true);
   try {
     const r = await api("app_mensaje", {texto: texto || "", llamada: !!opciones.llamada, audio: opciones.audio || null,
@@ -451,12 +588,15 @@ async function mandar(texto, opciones = {}) {
     }
     if (!r.ok) throw new Error(r.error || "No pude.");
     const respuesta = (r.mensajes || []).join("\n\n");
+    const acciones = r.acciones || [];
     pensando(false);
-    agregar({quien: "jarvis", texto: respuesta, tarjetas: r.tarjetas || []});
-    if (!opciones.llamada && respuesta && (ajustes.leer === "siempre" || (ajustes.leer === "auto" && opciones.porVoz))) {
+    agregar({quien: "jarvis", texto: respuesta, tarjetas: r.tarjetas || [], acciones: acciones});
+    if (acciones.length) intentarAbrir(acciones[0]);
+    if (!opciones.llamada && !opciones.sinVoz && respuesta
+        && (ajustes.leer === "siempre" || (ajustes.leer === "auto" && opciones.porVoz))) {
       Voz.decir(respuesta);
     }
-    return {texto: respuesta, tarjetas: r.tarjetas || [], pedido: r.pedido};
+    return {texto: respuesta, tarjetas: r.tarjetas || [], acciones: acciones, pedido: r.pedido};
   } catch (e) {
     pensando(false);
     agregar({quien: "aviso", texto: e.message});
@@ -529,6 +669,7 @@ async function dictar() {
   }
   Voz.callar();
   dictando = true;
+  await Oido.soltar();   // si estaba esperando «Jarvis», deja el micrófono libre
   $("boton-enviar").classList.add("grabando");
   $("caja").placeholder = "Te escucho...";
   const r = await Oido.oir((parcial) => { $("caja").value = parcial; ajustarCaja(); });
@@ -571,6 +712,242 @@ function sacarFoto() {
 }
 
 
+// ---------- Inicio: como JARVIS en la PC ----------
+
+let ocupado = false;   // está escuchando, pensando o hablando (por el botón o por «Jarvis»)
+
+function estadoInicio(estado, texto) {
+  const etiquetas = {escuchando: "TE ESCUCHO", pensando: "PENSANDO", hablando: "JARVIS", libre: "EN LÍNEA",
+                     esperando: "DECÍ «JARVIS»"};
+  $("inicio-estado").textContent = etiquetas[estado] || estado;
+  $("inicio-estado").className = "inicio-estado " + estado;
+  if (reactorInicio) reactorInicio.estado(estado === "esperando" ? "libre" : estado);
+  if (texto !== undefined) $("inicio-texto").textContent = texto;
+  $("boton-hablar").classList.toggle("grabando", estado === "escuchando" && !escucha.esperandoNombre);
+}
+
+async function procesarDicho(texto) {
+  // Lo que le dijiste en Inicio (con el botón o con «Jarvis, ...»): piensa, lo dice en voz alta y hace lo que pidió
+  ocupado = true;
+  try {
+    await Oido.soltar();   // que no quede escuchando mientras JARVIS habla (se oiría a sí mismo)
+    estadoInicio("pensando", "«" + texto + "»");
+    $("inicio-acciones").innerHTML = "";
+    const r = await mandar(texto, {porVoz: true, sinVoz: true});
+    const respuesta = r ? (r.texto || (r.tarjetas.length ? "Confirmalo acá abajo." : "")) : "No me pude conectar. ¿Hay internet?";
+    if (r) {
+      pintarAcciones($("inicio-acciones"), r.acciones);
+      r.tarjetas.forEach((t, i) => $("inicio-acciones").appendChild(pintarTarjeta(t, mensajes.length - 1, i)));
+    }
+    estadoInicio("hablando", respuesta);
+    await Voz.decir(respuesta);
+  } finally {
+    ocupado = false;
+    estadoInicio(escucha.activa ? "esperando" : "libre");
+  }
+}
+
+async function hablarEnInicio() {
+  // El botón grande HABLAR
+  if (ocupado) {
+    Voz.callar();
+    Oido.cortar();
+    return;
+  }
+  ocupado = true;
+  Voz.callar();
+  await Oido.soltar();   // si estaba esperando «Jarvis», deja de esperar
+  estadoInicio("escuchando", "Te escucho...");
+  const r = await Oido.oir((parcial) => { $("inicio-texto").textContent = parcial; });
+  ocupado = false;
+  if (r.error === "not-allowed") {
+    estadoInicio("libre", "Dale permiso al micrófono para hablarme (en los ajustes de Chrome).");
+    return;
+  }
+  if (r.audio) {
+    ocupado = true;
+    estadoInicio("pensando", "");
+    const respuesta = await mandar("", {audio: r.audio, porVoz: true, sinVoz: true});
+    ocupado = false;
+    estadoInicio("hablando", respuesta ? respuesta.texto : "No te entendí.");
+    if (respuesta) {
+      pintarAcciones($("inicio-acciones"), respuesta.acciones);
+      await Voz.decir(respuesta.texto);
+    }
+    estadoInicio("libre");
+    return;
+  }
+  if (!r.texto) {
+    estadoInicio("libre", "No te escuché. Tocá el micrófono y hablá.");
+    return;
+  }
+  await procesarDicho(r.texto);
+}
+
+async function preguntarYHacer(pregunta, armar) {
+  // Un protocolo que necesita un dato: «¿Qué música te pongo?» -> lo que digas
+  cambiarVista("inicio");
+  if (ocupado) return;
+  ocupado = true;
+  await Oido.soltar();
+  estadoInicio("hablando", pregunta);
+  await Voz.decir(pregunta);
+  estadoInicio("escuchando", pregunta);
+  const r = await Oido.oir((parcial) => { $("inicio-texto").textContent = parcial; });
+  ocupado = false;
+  if (r.texto) await procesarDicho(armar(r.texto));
+  else estadoInicio("libre", "No te escuché. Probá de nuevo.");
+}
+
+// «Jarvis, ...»: con la app abierta en Inicio, escucha todo el tiempo y responde cuando lo nombrás (como el manos
+// libres de la PC). Android hace un pitidito cada vez que vuelve a escuchar: es del celular, no se puede sacar
+const escucha = {activa: false, corriendo: false, esperandoNombre: false};
+const NOMBRE = /\b(?:j|y|h|ch)ar[vb]is\b[\s,.:!¡¿?]*(.*)$/i;
+
+function puedeEscuchar() {
+  return escucha.activa && vistaActual === "inicio" && document.visibilityState === "visible" && !llamada.activa;
+}
+
+async function cicloJarvis() {
+  if (escucha.corriendo || !Reco) return;
+  escucha.corriendo = true;
+  let errores = 0;
+  try {
+    while (puedeEscuchar()) {
+      if (ocupado) {
+        await esperar(400);
+        continue;
+      }
+      escucha.esperandoNombre = true;
+      estadoInicio("esperando");
+      const r = await Oido.escuchar();
+      escucha.esperandoNombre = false;
+      if (!puedeEscuchar()) break;
+      if (r.error === "not-allowed" || r.error === "service-not-allowed") {
+        activarEscucha(false);
+        estadoInicio("libre", "Dale permiso al micrófono para que te escuche (en los ajustes de Chrome).");
+        break;
+      }
+      if (r.error && !["no-speech", "aborted"].includes(r.error)) {
+        if (++errores > 3) await esperar(4000);   // sin internet o algo raro: que no quede dando vueltas
+        continue;
+      }
+      errores = 0;
+      const m = NOMBRE.exec(r.texto || "");
+      if (!m || ocupado) continue;
+      let pedido = m[1].trim();
+      if (!pedido) {   // dijiste solo «Jarvis»: te escucha el pedido
+        ocupado = true;
+        if (navigator.vibrate) navigator.vibrate(30);
+        estadoInicio("escuchando", "¿Sí?");
+        const r2 = await Oido.escuchar((parcial) => { $("inicio-texto").textContent = parcial; });
+        ocupado = false;
+        pedido = (r2.texto || "").trim();
+        if (!pedido) continue;
+      }
+      await procesarDicho(pedido);
+    }
+  } finally {
+    escucha.corriendo = false;
+    escucha.esperandoNombre = false;
+    if (!ocupado) estadoInicio("libre");
+  }
+}
+
+function activarEscucha(si) {
+  escucha.activa = si && !!Reco;
+  ajustes.escucharJarvis = escucha.activa;
+  guardar("ajustes", ajustes);
+  $("escuchar-jarvis").checked = escucha.activa;
+  if (si && !Reco) avisar("Este celular no tiene reconocimiento de voz: usá el botón HABLAR.", 5);
+  if (escucha.activa) cicloJarvis();
+  else if (escucha.esperandoNombre) Oido.cancelar();
+}
+
+function pausarEscucha() {
+  // otra cosa usa el micrófono (la charla, la llamada): deja de esperar «Jarvis» (vuelve solo después)
+  if (escucha.esperandoNombre) Oido.cancelar();
+}
+
+// Los protocolos de Inicio (como los de la PC)
+const ICONOS = {
+  llamar: '<path d="M6.6 3.5l3 3.3-1.8 2.4a12 12 0 0 0 7 7l2.4-1.8 3.3 3-1.8 3.1C11 21 3 13 3.5 5.3z"/>',
+  musica: '<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>',
+  whatsapp: '<path d="M4 20l1.4-4A8 8 0 1 1 8 18.6z"/><path d="M9 9c0 3 3 6 6 6l1-1.5-2-1-1 1c-1 0-2-1-2-2l1-1-1-2z"/>',
+  clima: '<circle cx="9" cy="10" r="3.5"/><path d="M9 3v1.5M3.5 10H2M5 5l1 1M13 5l-1 1M8 20h9a3.5 3.5 0 0 0 0-7 5 5 0 0 0-9.4 1.8A2.6 2.6 0 0 0 8 20z"/>',
+  noticias: '<rect x="3" y="5" width="15" height="14" rx="1.5"/><path d="M18 9h3v8a2 2 0 0 1-4 0M7 9h7M7 13h7M7 16h4"/>',
+  recordar: '<circle cx="12" cy="13" r="7"/><path d="M12 9v4l2.5 2M5 4L3 6M19 4l2 2"/>',
+  dia: '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4M8 14h3"/>',
+  mails: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/>',
+  abrir: '<rect x="4" y="4" width="6" height="6" rx="1.5"/><rect x="14" y="4" width="6" height="6" rx="1.5"/><rect x="4" y="14" width="6" height="6" rx="1.5"/><path d="M17 14v6M14 17h6"/>',
+  foto: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',
+  pc: '<rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/>',
+  juego: '<rect x="2" y="7" width="20" height="11" rx="5"/><path d="M7 10v4M5 12h4M15 11h.01M18 13h.01"/>',
+};
+const PROTOCOLOS = [
+  {id: "llamar", nombre: "Llamar", hacer: () => llamar()},
+  {id: "musica", nombre: "Música", hacer: () => preguntarYHacer("¿Qué música te pongo?", (t) => "Poné en el celular música de " + t)},
+  {id: "whatsapp", nombre: "WhatsApp", hacer: () => preguntarYHacer("¿A quién le escribo y qué le digo?", (t) => "Mandá un WhatsApp: " + t)},
+  {id: "clima", nombre: "Clima", hacer: () => procesarDichoDesdeToque("¿Cómo está el clima hoy y mañana?")},
+  {id: "noticias", nombre: "Noticias", hacer: () => procesarDichoDesdeToque("Contame en pocas oraciones las noticias más importantes de hoy.")},
+  {id: "recordar", nombre: "Recordame", hacer: () => preguntarYHacer("¿Qué te recuerdo y cuándo?", (t) => "Recordame " + t)},
+  {id: "dia", nombre: "Mi día", hacer: () => procesarDichoDesdeToque("¿Qué tengo hoy? Contame mi día en pocas oraciones.")},
+  {id: "mails", nombre: "Mails", hacer: () => cambiarVista("mails")},
+  {id: "abrir", nombre: "Abrir app", hacer: () => preguntarYHacer("¿Qué app abro?", (t) => "Abrí " + t)},
+  {id: "foto", nombre: "¿Qué es esto?", hacer: () => fotoYPreguntar()},
+  {id: "pc", nombre: "Mi PC", soloPc: true, hacer: () => cambiarVista("pc")},
+  {id: "juego", nombre: "Modo juego", soloPc: true, hacer: () => ordenParaLaPc("Modo juego")},
+];
+
+async function procesarDichoDesdeToque(texto) {
+  cambiarVista("inicio");
+  if (ocupado) return;
+  ocupado = true;
+  await Oido.soltar();
+  ocupado = false;
+  procesarDicho(texto);
+}
+
+function pintarProtocolos() {
+  const caja = $("protocolos");
+  caja.innerHTML = "";
+  PROTOCOLOS.filter((p) => !p.soloPc || tienePc()).forEach((p) => {
+    const boton = document.createElement("button");
+    boton.className = "protocolo";
+    boton.innerHTML = `<span class="hex"><svg viewBox="0 0 24 24">${ICONOS[p.id]}</svg></span><span>${p.nombre}</span>`;
+    boton.onclick = p.hacer;
+    caja.appendChild(boton);
+  });
+}
+
+function fotoYPreguntar() {
+  // la cámara: sacás una foto y JARVIS te dice qué es (y lo dice en voz alta)
+  const entrada = document.createElement("input");
+  entrada.type = "file";
+  entrada.accept = "image/*";
+  entrada.capture = "environment";
+  entrada.onchange = async () => {
+    if (!entrada.files[0]) return;
+    cambiarVista("inicio");
+    ocupado = true;
+    try {
+      await Oido.soltar();
+      const foto = await prepararFoto(entrada.files[0]);
+      estadoInicio("pensando", "Mirando la foto...");
+      const r = await mandar("¿Qué es esto? Contámelo breve.", {foto: foto, porVoz: true, sinVoz: true});
+      estadoInicio("hablando", r ? r.texto : "No me pude conectar.");
+      if (r) await Voz.decir(r.texto);
+    } catch (e) {
+      avisar("No pude abrir esa foto.");
+    } finally {
+      ocupado = false;
+      estadoInicio(escucha.activa ? "esperando" : "libre");
+    }
+  };
+  entrada.click();
+}
+
+
 // ---------- La llamada: manos libres ----------
 
 const llamada = {activa: false, pausada: false, silencios: 0, inicio: 0, reloj: null, pantalla: null, tocar: null};
@@ -579,7 +956,7 @@ function estadoLlamada(estado, texto) {
   const etiquetas = {escuchando: "TE ESCUCHO", pensando: "PENSANDO", hablando: "JARVIS", libre: "EN PAUSA"};
   $("llamada-estado").textContent = etiquetas[estado] || estado;
   $("llamada-estado").className = "llamada-estado " + estado;
-  Reactor.estado(estado);
+  reactorLlamada.estado(estado);
   if (texto !== undefined) $("llamada-texto").textContent = texto;
 }
 
@@ -592,11 +969,13 @@ async function llamar() {
   if (llamada.activa) return;
   Voz.callar();
   Object.assign(llamada, {activa: true, pausada: false, silencios: 0, inicio: Date.now()});
+  Oido.soltar();   // si estaba esperando «Jarvis», deja el micrófono (para cuando termine el saludo ya está libre)
   $("aviso").hidden = true;
   $("llamada").hidden = false;
   $("llamada-tarjetas").innerHTML = "";
   $("boton-pausa").classList.remove("pausado");
-  Reactor.prender();
+  reactorLlamada.prender();
+  if (reactorInicio) reactorInicio.apagar();
   llamada.reloj = setInterval(() => {
     const s = Math.floor((Date.now() - llamada.inicio) / 1000);
     $("llamada-tiempo").textContent = String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
@@ -610,7 +989,7 @@ async function llamar() {
 }
 
 function esCortar(texto) {
-  const t = texto.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^\w\s]/g, " ").trim();
+  const t = normalizar(texto);
   return /^(chau|chao|adios|nos vemos|hasta luego|colga|colgamos|corta|corta la llamada|corto|termina la llamada)( jarvis)?$/.test(t);
 }
 
@@ -647,6 +1026,9 @@ async function cicloLlamada() {
     if (!llamada.activa) return;
     let respuesta = r ? r.texto : "Uy, no me pude conectar. ¿Probamos de nuevo?";
     $("llamada-tarjetas").innerHTML = "";
+    if (r && r.acciones.length) {   // abrir una app, música, WhatsApp: el botón aparece en la llamada
+      pintarAcciones($("llamada-tarjetas"), r.acciones);
+    }
     if (r && r.tarjetas.length) {   // hay que confirmar algo: los botones aparecen en la llamada también
       r.tarjetas.forEach((t, i) => $("llamada-tarjetas").appendChild(pintarTarjeta(t, mensajes.length - 1, i)));
       if (!respuesta) respuesta = "Confirmalo en la pantalla.";
@@ -665,8 +1047,10 @@ function colgar() {
   if (llamada.pantalla) llamada.pantalla.release().catch(() => {});
   llamada.pantalla = null;
   if (llamada.tocar) llamada.tocar();
-  Reactor.apagar();
+  reactorLlamada.apagar();
   $("llamada").hidden = true;
+  if (vistaActual === "inicio" && reactorInicio) reactorInicio.prender();
+  if (escucha.activa) cicloJarvis();
 }
 
 function tocarReactor() {
@@ -707,6 +1091,7 @@ async function cargarDatos() {
   } catch (e) { /* queda lo último que se vio */ }
   pintarDia();
   pintarPc();
+  pintarProtocolos();
 }
 
 const DIAS_CORTOS = ["DOM", "LUN", "MAR", "MIÉ", "JUE", "VIE", "SÁB"];
@@ -790,6 +1175,7 @@ async function accionDia(accion, aviso) {
 
 function pintarPc() {
   const d = datosDia;
+  $("ver-pc").hidden = !tienePc();
   if (!d || !d.pc) return;
   const pc = d.pc;
   let html;
@@ -824,13 +1210,76 @@ async function ordenParaLaPc(orden) {
 }
 
 
+// ---------- Mails ----------
+
+async function cargarMails() {
+  const lista = $("mails");
+  lista.innerHTML = '<div class="cargando">Buscando tus mails...</div>';
+  let d;
+  try {
+    d = await api("app_mails");
+    if (!d.ok) throw new Error(d.error || "No pude ver los mails.");
+  } catch (e) {
+    lista.innerHTML = `<div class="vacio">${escapar(e.message)}</div>`;
+    return;
+  }
+  lista.innerHTML = "";
+  if (!d.mails.length) lista.innerHTML = '<div class="vacio">No tenés mails sin leer. 📭</div>';
+  d.mails.forEach((m) => {
+    const item = document.createElement("div");
+    item.className = "item mail";
+    item.innerHTML = `<div class="texto"><span class="cuando">${escapar(m.de.toUpperCase())} · ${escapar(m.fecha)}</span>
+      <b>${escapar(m.asunto)}</b><span class="para">${escapar(m.resumen)}</span></div>
+      <div class="mail-botones"><button class="boton" data-que="leer">Leer en voz alta</button>
+      <button class="boton" data-que="resumir">Resumir</button><button class="boton" data-que="responder">Responder</button></div>
+      <form class="fila-agregar mail-respuesta" hidden autocomplete="off"><input placeholder="¿Qué le contesto?">
+      <button class="boton principal">Mandar</button></form>`;
+    item.querySelector(".texto").onclick = () => item.classList.toggle("abierto");
+    item.querySelector('[data-que="leer"]').onclick = async () => {
+      try {
+        const r = await api("app_mail", {id: m.id});
+        Voz.decir(`Mail de ${m.de}. ${m.asunto}. ${(r.mail && r.mail.texto || "").slice(0, 900)}`);
+      } catch (e) {
+        avisar(e.message);
+      }
+    };
+    item.querySelector('[data-que="resumir"]').onclick = () => {
+      cambiarVista("charla");
+      mandar(`Resumime en pocas oraciones el mail de ${m.de} con asunto «${m.asunto}» (id ${m.id}).`, {porVoz: true});
+    };
+    const form = item.querySelector(".mail-respuesta");
+    item.querySelector('[data-que="responder"]').onclick = () => {
+      form.hidden = !form.hidden;
+      if (!form.hidden) form.querySelector("input").focus();
+    };
+    form.onsubmit = (e) => {
+      e.preventDefault();
+      const texto = form.querySelector("input").value.trim();
+      if (!texto) return;
+      cambiarVista("charla");
+      mandar(`Respondé el mail id ${m.id} (de ${m.de}, «${m.asunto}») diciendo: ${texto}`);
+    };
+    lista.appendChild(item);
+  });
+}
+
+
 // ---------- Pestañas, ajustes e instalar ----------
 
 function cambiarVista(nombre) {
+  if (nombre === "pc" && !tienePc()) nombre = "inicio";
+  vistaActual = nombre;
   document.querySelectorAll(".vista").forEach((v) => v.classList.toggle("activa", v.id === "vista-" + nombre));
   document.querySelectorAll(".pestana[data-vista]").forEach((b) => b.classList.toggle("activa", b.dataset.vista === nombre));
+  if (reactorInicio) {
+    if (nombre === "inicio" && !llamada.activa) reactorInicio.prender();
+    else reactorInicio.apagar();
+  }
+  if (nombre !== "inicio") pausarEscucha();
+  else if (escucha.activa) cicloJarvis();
   if (nombre === "charla") bajar();
-  else cargarDatos();
+  else if (nombre === "mails") cargarMails();
+  else if (nombre === "dia" || nombre === "pc") cargarDatos();
 }
 
 function llenarVoces() {
@@ -851,6 +1300,7 @@ function llenarVoces() {
 function abrirAjustes() {
   llenarVoces();
   $("ajuste-leer").value = ajustes.leer;
+  $("ajuste-musica").value = ajustes.musica;
   $("ajuste-velocidad").value = ajustes.velocidad;
   $("velocidad-valor").textContent = ajustes.velocidad.toFixed(2) + "x";
   $("ajustes-info").textContent = `Versión ${VERSION_APP}. ` + (Reco ? "Te escucha con el reconocimiento de voz del celular."
@@ -860,6 +1310,7 @@ function abrirAjustes() {
 
 function guardarAjustes() {
   ajustes.leer = $("ajuste-leer").value;
+  ajustes.musica = $("ajuste-musica").value;
   ajustes.nombreVoz = $("ajuste-voz").value;
   ajustes.velocidad = Number($("ajuste-velocidad").value);
   guardar("ajustes", ajustes);
@@ -877,6 +1328,7 @@ window.addEventListener("appinstalled", () => { $("boton-instalar").hidden = tru
 // ---------- Arranque ----------
 
 function conectarBotones() {
+  document.addEventListener("pointerdown", () => { ultimoToque = Date.now(); }, true);
   $("barra").addEventListener("submit", (e) => { e.preventDefault(); enviarLoEscrito(); });
   $("caja").addEventListener("input", ajustarCaja);
   $("caja").addEventListener("keydown", (e) => {
@@ -906,6 +1358,10 @@ function conectarBotones() {
   $("boton-colgar").onclick = colgar;
   $("boton-pausa").onclick = pausar;
   $("llamada-reactor").onclick = tocarReactor;
+  $("boton-hablar").onclick = hablarEnInicio;
+  $("inicio-reactor").onclick = () => { if (ocupado) { Voz.callar(); Oido.cortar(); } };
+  $("escuchar-jarvis").onchange = () => activarEscucha($("escuchar-jarvis").checked);
+  $("actualizar-mails").onclick = cargarMails;
 
   $("nuevo-pendiente").addEventListener("submit", (e) => {
     e.preventDefault();
@@ -933,13 +1389,24 @@ function conectarBotones() {
     guardarAjustes();
     Voz.decir("Hola, soy JARVIS. Así te voy a hablar.");
   };
+  $("ver-pc").onclick = () => { $("ajustes").close(); cambiarVista("pc"); };
   $("desconectar").onclick = () => {
-    if (!confirm("¿Desconecto este celular de tu JARVIS? Para volver a conectarlo, mandá /app en Telegram.")) return;
+    if (!confirm("¿Desconecto este celular de este JARVIS? Para volver a conectarlo, mandá /app en Telegram.")) return;
     ["conexion", "mensajes", "ultimaCharla", "dia"].forEach((c) => localStorage.removeItem(GUARDADO + c));
     conexion = null;
     $("ajustes").close();
     mostrarConectar();
   };
+  $("form-a-mano").addEventListener("submit", (e) => {   // por si el link no anduvo: la dirección y la llave a mano
+    e.preventDefault();
+    const u = $("a-mano-url").value.trim(), k = $("a-mano-llave").value.trim();
+    if (!/^https:\/\/script\.google(?:usercontent)?\.com\//.test(u) || k.length < 20) {
+      $("conectar-detalle").textContent = "Fijate la dirección (empieza con https://script.google.com/) y la llave.";
+      return;
+    }
+    guardar("conexion", {u: u, k: k});
+    location.reload();
+  });
   $("boton-instalar").onclick = async () => {
     if (!instalador) return;
     instalador.prompt();
@@ -951,7 +1418,12 @@ function conectarBotones() {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible" && conexion) {
       sincronizarCharla();
-      if (!$("vista-charla").classList.contains("activa")) cargarDatos();
+      if (vistaActual === "dia" || vistaActual === "pc") cargarDatos();
+      if (vistaActual === "inicio" && reactorInicio && !llamada.activa) reactorInicio.prender();
+      if (escucha.activa) cicloJarvis();
+    } else {
+      if (reactorInicio) reactorInicio.apagar();
+      pausarEscucha();
     }
   });
 }
@@ -961,10 +1433,13 @@ window.addEventListener("hashchange", () => { if (/[#&]k=/.test(location.hash)) 
 
 function arrancar() {
   leerLink();
-  Reactor.iniciar($("reactor"));
+  reactorInicio = crearReactor($("reactor-inicio"));
+  reactorLlamada = crearReactor($("reactor"));
   conectarBotones();
+  pintarProtocolos();
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
   if (!conexion) return mostrarConectar();
+  reactorInicio.prender();
   pintarCharla();
   pintarDia();
   pintarPc();
@@ -975,6 +1450,11 @@ function arrancar() {
   setInterval(() => {
     if (document.visibilityState === "visible" && !llamada.activa) sincronizarCharla();
   }, 60000);
+  if (ajustes.escucharJarvis && Reco) {
+    escucha.activa = true;
+    $("escuchar-jarvis").checked = true;
+    cicloJarvis();
+  }
   if (new URLSearchParams(location.search).get("llamar")) {   // el atajo «Llamar» del ícono
     avisar("Tocá Llamar para empezar (el celular pide un toque antes de usar el micrófono).", 5);
   }

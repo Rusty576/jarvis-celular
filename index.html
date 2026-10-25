@@ -26,6 +26,14 @@
     <li>Tocá el link que te manda <b>desde este celular</b>.</li>
   </ol>
   <p id="conectar-detalle" class="conectar-detalle"></p>
+  <details class="a-mano">
+    <summary>Conectar a mano</summary>
+    <form id="form-a-mano" autocomplete="off">
+      <input id="a-mano-url" placeholder="Dirección del bot (termina en /exec)" inputmode="url">
+      <input id="a-mano-llave" placeholder="Llave">
+      <button class="boton principal">Conectar</button>
+    </form>
+  </details>
 </section>
 
 <header class="cabecera">
@@ -35,11 +43,33 @@
     <small><i class="punto" id="punto"></i><span id="estado-conexion">conectando...</span></small>
   </div>
   <button id="boton-instalar" class="instalar" hidden>Instalar</button>
+  <button id="boton-ajustes" class="icono-boton chico" aria-label="Ajustes">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg>
+  </button>
 </header>
 
 <main>
+  <!-- Inicio: como JARVIS en la PC (el reactor, hablarle y los protocolos) -->
+  <section id="vista-inicio" class="vista activa">
+    <div class="inicio-reactor" id="inicio-reactor">
+      <canvas id="reactor-inicio"></canvas>
+      <div class="inicio-estado" id="inicio-estado">EN LÍNEA</div>
+    </div>
+    <p class="inicio-texto" id="inicio-texto">Tocá el micrófono y hablame.</p>
+    <div class="acciones" id="inicio-acciones"></div>
+    <div class="inicio-hablar">
+      <button id="boton-hablar" class="hablar" aria-label="Hablarle a JARVIS">
+        <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+        <span id="hablar-texto">HABLAR</span>
+      </button>
+    </div>
+    <label class="escucha"><input type="checkbox" id="escuchar-jarvis"> <span>Escuchar «Jarvis» (manos libres)</span></label>
+    <h2>PROTOCOLOS</h2>
+    <div class="protocolos" id="protocolos"></div>
+  </section>
+
   <!-- Charla -->
-  <section id="vista-charla" class="vista activa">
+  <section id="vista-charla" class="vista">
     <div id="mensajes" class="mensajes"></div>
     <div id="foto-lista" class="foto-lista" hidden>
       <img id="foto-miniatura" alt="">
@@ -66,7 +96,7 @@
     <div class="tarjeta" id="clima"><div class="cargando">Cargando...</div></div>
     <h2>RECORDATORIOS</h2>
     <div id="recordatorios" class="lista"></div>
-    <p class="ayuda">Para crear uno, decíselo en la charla: «recordame mañana a las 9 llamar al dentista».</p>
+    <p class="ayuda">Para crear uno, decíselo: «recordame mañana a las 9 llamar al dentista».</p>
     <h2>PENDIENTES</h2>
     <form id="nuevo-pendiente" class="fila-agregar" autocomplete="off">
       <input id="caja-pendiente" placeholder="Algo que tengas que hacer">
@@ -75,7 +105,16 @@
     <div id="pendientes" class="lista"></div>
   </section>
 
-  <!-- La PC -->
+  <!-- Mails -->
+  <section id="vista-mails" class="vista">
+    <div class="fila-titulo">
+      <h2>MAILS SIN LEER</h2>
+      <button id="actualizar-mails" class="boton">Actualizar</button>
+    </div>
+    <div id="mails" class="lista"><div class="cargando">Cargando...</div></div>
+  </section>
+
+  <!-- La PC (solo si tenés JARVIS en una PC) -->
   <section id="vista-pc" class="vista">
     <div class="tarjeta" id="pc-estado"><div class="cargando">Cargando...</div></div>
     <h2>ÓRDENES PARA LA PC</h2>
@@ -89,21 +128,21 @@
 </main>
 
 <nav class="pestanas">
-  <button data-vista="charla" class="pestana activa">
-    <svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></svg><span>Charla</span>
+  <button data-vista="inicio" class="pestana activa">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg><span>Inicio</span>
   </button>
-  <button data-vista="dia" class="pestana">
-    <svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg><span>Mi día</span>
+  <button data-vista="charla" class="pestana">
+    <svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></svg><span>Charla</span>
   </button>
   <button id="boton-llamar" class="pestana llamar" aria-label="Llamar a JARVIS">
     <span class="llamar-circulo"><svg viewBox="0 0 24 24"><path d="M6.6 3.5l3 3.3-1.8 2.4a12 12 0 0 0 7 7l2.4-1.8 3.3 3-1.8 3.1C11 21 3 13 3.5 5.3z"/></svg></span>
     <span>Llamar</span>
   </button>
-  <button data-vista="pc" class="pestana">
-    <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/></svg><span>PC</span>
+  <button data-vista="dia" class="pestana">
+    <svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg><span>Mi día</span>
   </button>
-  <button id="boton-ajustes" class="pestana">
-    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg><span>Ajustes</span>
+  <button data-vista="mails" class="pestana">
+    <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg><span>Mails</span>
   </button>
 </nav>
 
@@ -143,6 +182,13 @@
         <option value="nunca">Nunca</option>
       </select>
     </label>
+    <label class="opcion">La música, con
+      <select id="ajuste-musica">
+        <option value="youtube">YouTube</option>
+        <option value="ytmusic">YouTube Music</option>
+        <option value="spotify">Spotify</option>
+      </select>
+    </label>
     <label class="opcion">Voz de JARVIS
       <select id="ajuste-voz"></select>
     </label>
@@ -150,6 +196,7 @@
       <input id="ajuste-velocidad" type="range" min="0.8" max="1.5" step="0.05">
     </label>
     <button type="button" id="probar-voz" class="boton">Probar la voz</button>
+    <button type="button" id="ver-pc" class="boton">La PC</button>
     <p class="ayuda" id="ajustes-info"></p>
     <div class="hoja-botones">
       <button type="button" id="desconectar" class="boton peligro">Desconectar este celular</button>

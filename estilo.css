@@ -69,6 +69,61 @@ svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width:
   padding: 6px 14px; font-family: var(--titulo); font-size: 11px; letter-spacing: 0.15em;
 }
 
+.cabecera .icono-boton.chico { width: 38px; height: 38px; }
+
+/* ---------- Inicio: como JARVIS en la PC ---------- */
+#vista-inicio.activa { display: flex; flex-direction: column; align-items: center; padding: 6px 16px 22px; }
+.inicio-reactor { position: relative; width: 100%; height: min(42vh, 330px); flex: none; cursor: pointer; }
+.inicio-reactor canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.inicio-estado { position: absolute; left: 0; right: 0; bottom: 2px; text-align: center; font-family: var(--titulo);
+                 font-weight: 700; font-size: 13px; letter-spacing: 0.45em; padding-left: 0.45em; color: var(--cian);
+                 text-shadow: 0 0 12px rgba(41, 217, 255, 0.7); }
+.inicio-estado.escuchando { color: var(--verde); text-shadow: 0 0 12px rgba(77, 255, 184, 0.6); }
+.inicio-estado.pensando { color: var(--ambar); text-shadow: 0 0 12px rgba(255, 181, 71, 0.6); }
+.inicio-estado.esperando { color: var(--texto-2); letter-spacing: 0.3em; }
+.inicio-texto { width: 100%; min-height: 2.8em; max-height: 8.5em; overflow-y: auto; margin: 10px 0 4px; text-align: center;
+                font-size: 18px; font-weight: 500; line-height: 1.35; color: var(--texto); white-space: pre-wrap; }
+.inicio-hablar { margin: 8px 0 6px; }
+.hablar { display: flex; align-items: center; gap: 10px; padding: 14px 30px; border: none; border-radius: 34px;
+          background: radial-gradient(circle at 50% 30%, #7ae9ff, #1aa6cf 75%); color: #021018; font-family: var(--titulo);
+          font-weight: 700; font-size: 14px; letter-spacing: 0.25em; box-shadow: 0 0 24px rgba(41, 217, 255, 0.55); }
+.hablar svg { width: 26px; height: 26px; }
+.hablar.grabando { background: radial-gradient(circle at 50% 30%, #b4ffe1, #22c98a 75%); box-shadow: 0 0 26px var(--verde);
+                   animation: latido 1s ease-in-out infinite; }
+.escucha { display: flex; align-items: center; gap: 8px; margin: 6px 0 2px; color: var(--texto-2); font-size: 15px; }
+.escucha input { width: 20px; height: 20px; accent-color: var(--cian); }
+#vista-inicio h2 { align-self: flex-start; margin-top: 18px; }
+.protocolos { width: 100%; display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px 6px; }
+.protocolo { display: flex; flex-direction: column; align-items: center; gap: 6px; border: none; background: none;
+             color: var(--texto-2); font-size: 13px; font-weight: 600; text-align: center; line-height: 1.1; }
+.protocolo .hex { width: 58px; height: 64px; display: grid; place-items: center; color: var(--cian);
+                  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+                  background: linear-gradient(160deg, rgba(41, 217, 255, 0.28), rgba(6, 24, 38, 0.95) 55%); }
+.protocolo .hex svg { width: 26px; height: 26px; filter: drop-shadow(0 0 4px rgba(41, 217, 255, 0.7)); }
+.protocolo:active .hex { background: linear-gradient(160deg, rgba(41, 217, 255, 0.55), rgba(6, 24, 38, 0.95) 60%); }
+
+/* lo que se hace en el celular (abrir una app, música, WhatsApp, llamar) */
+.acciones { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 8px; width: 100%; }
+.msg .acciones { justify-content: flex-start; }
+.accion { padding: 10px 16px; border-radius: 20px; border: 1px solid var(--verde); background: rgba(77, 255, 184, 0.1);
+          color: var(--verde); font-weight: 700; font-size: 16px; }
+
+/* ---------- Mails ---------- */
+.fila-titulo { display: flex; align-items: center; justify-content: space-between; }
+.fila-titulo h2 { margin: 6px 0 10px; }
+.item.mail { flex-direction: column; align-items: stretch; }
+.item.mail .texto b { display: block; margin: 2px 0; }
+.item.mail .para { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.item.mail.abierto .para { -webkit-line-clamp: unset; }
+.mail-botones { display: none; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.item.mail.abierto .mail-botones { display: flex; }
+.mail-respuesta { margin: 10px 0 0; }
+
+/* ---------- Conectar a mano ---------- */
+.a-mano { margin-top: 18px; color: var(--texto-3); width: min(100%, 360px); }
+.a-mano form { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.a-mano input { padding: 10px 12px; border-radius: 10px; background: var(--panel); border: 1px solid var(--panel-borde); }
+
 /* ---------- Las vistas ---------- */
 main { flex: 1; min-height: 0; position: relative; }
 .vista { display: none; height: 100%; overflow-y: auto; padding: 14px 16px 20px; }
