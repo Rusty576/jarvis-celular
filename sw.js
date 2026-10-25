@@ -1,7 +1,7 @@
 // El "service worker": guarda la app en el celular, así abre al toque (y aunque no haya internet se ve, con lo último
 // que tenía). Lo que se le pide a JARVIS siempre va por internet. Cambiá VERSION cuando publiques cambios: así los
 // celulares bajan la app nueva.
-const VERSION = "jarvis-2026.10.24.2";
+const VERSION = "jarvis-2026.10.25.1";
 const ARCHIVOS = ["./", "index.html", "estilo.css", "fuentes.css", "app.js", "reactor.js", "manifest.webmanifest",
                   "iconos/icono-192.png", "iconos/icono-512.png", "iconos/icono-maskable-512.png", "iconos/apple-touch-icon.png",
                   "fuentes/Orbitron-700-latin.woff2", "fuentes/Orbitron-900-latin.woff2", "fuentes/Rajdhani-500-latin.woff2",
@@ -19,6 +19,7 @@ self.addEventListener("activate", (e) => {
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== "GET" || url.origin !== location.origin) return;   // lo de JARVIS (Google) no se guarda
+  if (url.pathname.includes("/android/")) return;   // la app de Android (el APK) se baja, no se guarda acá
   // primero internet (así siempre está lo último), y si no hay, lo guardado
   e.respondWith(fetch(e.request).then((r) => {
     const copia = r.clone();

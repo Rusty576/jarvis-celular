@@ -21,10 +21,16 @@
   <img src="iconos/icono-512.png" alt="" class="conectar-logo">
   <h1>J.A.R.V.I.S.</h1>
   <p>Para conectar esta app con tu JARVIS:</p>
-  <ol>
+  <ol class="solo-web">
     <li>En Telegram, mandale <b>/app</b> a tu JARVIS.</li>
     <li>Tocá el link que te manda <b>desde este celular</b>.</li>
   </ol>
+  <ol class="solo-nativa">
+    <li>En Telegram, mandale <b>/app</b> a tu JARVIS.</li>
+    <li>Mantené apretado el link que te manda y tocá <b>Copiar</b>.</li>
+    <li>Volvé acá y tocá <b>Pegar el link</b>.</li>
+  </ol>
+  <button id="pegar-link" class="boton principal solo-nativa">Pegar el link</button>
   <p id="conectar-detalle" class="conectar-detalle"></p>
   <details class="a-mano">
     <summary>Conectar a mano</summary>
@@ -63,7 +69,7 @@
         <span id="hablar-texto">HABLAR</span>
       </button>
     </div>
-    <label class="escucha"><input type="checkbox" id="escuchar-jarvis"> <span>Escuchar «Jarvis» (manos libres)</span></label>
+    <label class="interruptor escucha"><input type="checkbox" id="escuchar-jarvis"> <span>Escuchar «Jarvis» (manos libres)</span></label>
     <h2>PROTOCOLOS</h2>
     <div class="protocolos" id="protocolos"></div>
   </section>
@@ -127,22 +133,23 @@
   </section>
 </main>
 
+<!-- La barra de abajo, como la de Android: un ícono con su pastilla por pestaña (Llamar también, sin salirse de la
+     barra: antes el botón redondo tapaba lo de arriba) -->
 <nav class="pestanas">
   <button data-vista="inicio" class="pestana activa">
-    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg><span>Inicio</span>
+    <span class="indicador"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg></span><span>Inicio</span>
   </button>
   <button data-vista="charla" class="pestana">
-    <svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></svg><span>Charla</span>
+    <span class="indicador"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></svg></span><span>Charla</span>
   </button>
   <button id="boton-llamar" class="pestana llamar" aria-label="Llamar a JARVIS">
-    <span class="llamar-circulo"><svg viewBox="0 0 24 24"><path d="M6.6 3.5l3 3.3-1.8 2.4a12 12 0 0 0 7 7l2.4-1.8 3.3 3-1.8 3.1C11 21 3 13 3.5 5.3z"/></svg></span>
-    <span>Llamar</span>
+    <span class="indicador"><svg viewBox="0 0 24 24"><path d="M6.6 3.5l3 3.3-1.8 2.4a12 12 0 0 0 7 7l2.4-1.8 3.3 3-1.8 3.1C11 21 3 13 3.5 5.3z"/></svg></span><span>Llamar</span>
   </button>
   <button data-vista="dia" class="pestana">
-    <svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg><span>Mi día</span>
+    <span class="indicador"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg></span><span>Mi día</span>
   </button>
   <button data-vista="mails" class="pestana">
-    <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg><span>Mails</span>
+    <span class="indicador"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg></span><span>Mails</span>
   </button>
 </nav>
 
@@ -195,8 +202,28 @@
     <label class="opcion">Velocidad de la voz <b id="velocidad-valor"></b>
       <input id="ajuste-velocidad" type="range" min="0.8" max="1.5" step="0.05">
     </label>
-    <button type="button" id="probar-voz" class="boton">Probar la voz</button>
-    <button type="button" id="ver-pc" class="boton">La PC</button>
+    <div class="hoja-fila">
+      <button type="button" id="probar-voz" class="boton">Probar la voz</button>
+      <button type="button" id="ver-pc" class="boton">La PC</button>
+    </div>
+    <!-- solo en la app de Android -->
+    <div id="ajustes-nativos" hidden>
+      <label class="interruptor"><input type="checkbox" id="ajuste-avisos">
+        <span>Avisarme los recordatorios desde el celular (suenan aunque no haya internet)</span></label>
+      <div class="hoja-fila">
+        <button type="button" id="ajuste-asistente" class="boton">Asistente del celular</button>
+        <button type="button" id="ajuste-permisos" class="boton">Permisos</button>
+        <button type="button" id="ajuste-actualizar" class="boton">Actualizar</button>
+      </div>
+    </div>
+    <!-- en la web app, en un Android: la app de verdad -->
+    <div id="ajustes-android" hidden>
+      <p class="ayuda">Hay app de Android: llama, pone alarmas, abre cualquier app y anda sin internet.</p>
+      <div class="hoja-fila">
+        <a id="bajar-android" class="boton" href="#">Bajar la app</a>
+        <button type="button" id="conectar-android" class="boton">Conectarla a este JARVIS</button>
+      </div>
+    </div>
     <p class="ayuda" id="ajustes-info"></p>
     <div class="hoja-botones">
       <button type="button" id="desconectar" class="boton peligro">Desconectar este celular</button>
@@ -205,7 +232,7 @@
   </form>
 </dialog>
 
-<div id="aviso" class="aviso" hidden></div>
+<div id="aviso" class="cartel" hidden></div>
 
 <script src="reactor.js"></script>
 <script src="app.js"></script>

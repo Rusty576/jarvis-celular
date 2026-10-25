@@ -21,6 +21,20 @@
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 [hidden] { display: none !important; }
+/* como una app: lo de la interfaz no se selecciona con un toque largo (los mensajes y lo que escribís, sí) */
+body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.msg, input, textarea, .inicio-texto, .item .texto, .pc-detalle, .llamada-texto { -webkit-user-select: text; user-select: text; }
+/* lo que es solo de la app de Android, o solo de la web app */
+.solo-nativa { display: none !important; }
+.nativa .solo-nativa { display: revert !important; }
+.nativa .solo-web { display: none !important; }
+
+/* la onda al tocar (como en Android) */
+.protocolo, .boton, .chip, .accion, .hablar, .icono-boton, .pestana .indicador { position: relative; overflow: hidden; }
+.onda { position: absolute; border-radius: 50%; background: rgba(122, 233, 255, 0.22); transform: scale(0); pointer-events: none;
+        animation: onda 0.55s ease-out forwards; }
+.boton.principal .onda, .hablar .onda, .icono-boton.principal .onda { background: rgba(2, 16, 24, 0.22); }
+@keyframes onda { to { transform: scale(1); opacity: 0; } }
 
 html, body {
   margin: 0;
@@ -64,6 +78,7 @@ svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width:
 .punto { width: 7px; height: 7px; border-radius: 50%; background: var(--texto-3); }
 .punto.bien { background: var(--verde); box-shadow: 0 0 8px var(--verde); }
 .punto.mal { background: var(--rojo); box-shadow: 0 0 8px var(--rojo); }
+.punto.problema { background: var(--ambar); box-shadow: 0 0 8px var(--ambar); }
 .instalar {
   border: 1px solid var(--cian); background: var(--cian-tenue); color: var(--cian-fuerte); border-radius: 18px;
   padding: 6px 14px; font-family: var(--titulo); font-size: 11px; letter-spacing: 0.15em;
@@ -90,8 +105,16 @@ svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width:
 .hablar svg { width: 26px; height: 26px; }
 .hablar.grabando { background: radial-gradient(circle at 50% 30%, #b4ffe1, #22c98a 75%); box-shadow: 0 0 26px var(--verde);
                    animation: latido 1s ease-in-out infinite; }
-.escucha { display: flex; align-items: center; gap: 8px; margin: 6px 0 2px; color: var(--texto-2); font-size: 15px; }
-.escucha input { width: 20px; height: 20px; accent-color: var(--cian); }
+/* los interruptores, como los de Android */
+.interruptor { display: flex; align-items: center; gap: 12px; color: var(--texto-2); font-size: 15px; line-height: 1.25; }
+.interruptor input { -webkit-appearance: none; appearance: none; flex: none; position: relative; width: 48px; height: 28px; margin: 0;
+                     border-radius: 14px; border: 2px solid var(--texto-3); background: var(--panel); transition: background 0.2s, border-color 0.2s; }
+.interruptor input::after { content: ""; position: absolute; top: 5px; left: 5px; width: 14px; height: 14px; border-radius: 50%;
+                            background: var(--texto-3); transition: all 0.2s; }
+.interruptor input:checked { background: var(--cian); border-color: var(--cian); }
+.interruptor input:checked::after { top: 2px; left: 22px; width: 20px; height: 20px; background: #021018; }
+.escucha { margin: 10px 0 2px; }
+.hoja .interruptor { margin: 4px 0 14px; }
 #vista-inicio h2 { align-self: flex-start; margin-top: 18px; }
 .protocolos { width: 100%; display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px 6px; }
 .protocolo { display: flex; flex-direction: column; align-items: center; gap: 6px; border: none; background: none;
@@ -220,18 +243,22 @@ h2 { font-family: var(--titulo); font-size: 12px; font-weight: 700; letter-spaci
 .pc-linea .punto { width: 10px; height: 10px; }
 .pc-detalle { margin-top: 8px; color: var(--texto-2); line-height: 1.35; white-space: pre-wrap; }
 
-/* ---------- Las pestañas de abajo ---------- */
-.pestanas { display: grid; grid-template-columns: repeat(5, 1fr); align-items: end; padding: 4px 6px calc(6px + var(--abajo));
-            border-top: 1px solid var(--panel-borde); background: rgba(2, 7, 13, 0.95); }
-.pestana { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 0 2px; border: none;
-           background: none; color: var(--texto-3); font-size: 12px; font-weight: 600; letter-spacing: 0.04em; }
-.pestana.activa { color: var(--cian); }
+/* ---------- Las pestañas de abajo (como la barra de Android: el ícono en una pastilla) ---------- */
+.pestanas { flex: none; display: grid; grid-template-columns: repeat(5, 1fr); padding: 8px 4px calc(10px + var(--abajo));
+            border-top: 1px solid var(--panel-borde); background: #030d16; }
+.pestana { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 0 0 2px; border: none; border-radius: 14px;
+           background: none; color: var(--texto-3); font-size: 12px; font-weight: 600; letter-spacing: 0.03em; }
+.pestana .indicador { width: 58px; height: 32px; border-radius: 16px; display: grid; place-items: center;
+                      transition: background 0.2s; }
+.pestana .indicador svg { width: 22px; height: 22px; }
+.pestana.activa { color: var(--cian-fuerte); }
+.pestana.activa .indicador { background: rgba(41, 217, 255, 0.18); }
 .pestana.activa svg { filter: drop-shadow(0 0 6px rgba(41, 217, 255, 0.7)); }
-.llamar { color: var(--texto-2); }
-.llamar-circulo { width: 58px; height: 58px; margin-top: -26px; border-radius: 50%; display: grid; place-items: center;
-                  background: radial-gradient(circle at 50% 40%, #7ae9ff, #1aa6cf 70%); color: #021018;
-                  box-shadow: 0 0 0 4px var(--fondo), 0 0 22px rgba(41, 217, 255, 0.7); }
-.llamar-circulo svg { width: 28px; height: 28px; fill: currentColor; stroke: none; }
+/* Llamar se destaca con su pastilla llena, sin salirse de la barra */
+.pestana.llamar { color: var(--texto-2); }
+.pestana.llamar .indicador { background: radial-gradient(circle at 50% 30%, #7ae9ff, #1aa6cf 80%); color: #021018;
+                             box-shadow: 0 0 14px rgba(41, 217, 255, 0.5); }
+.pestana.llamar svg { fill: currentColor; stroke: none; }
 
 /* ---------- La llamada ---------- */
 .llamada { position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column; align-items: center;
@@ -271,14 +298,27 @@ h2 { font-family: var(--titulo); font-size: 12px; font-weight: 700; letter-spaci
 .conectar b { color: var(--cian-fuerte); }
 .conectar-detalle { color: var(--ambar); }
 
-.hoja { width: min(94vw, 460px); border: 1px solid var(--panel-borde); border-radius: 18px; padding: 6px 18px 18px;
+/* los ajustes: una hoja que sube desde abajo (como en Android) */
+.hoja { width: 100%; max-width: 560px; max-height: 88dvh; margin: auto auto 0; border: 1px solid var(--panel-borde);
+        border-bottom: none; border-radius: 24px 24px 0 0; padding: 6px 20px calc(18px + var(--abajo)); overflow-y: auto;
         background: #04121d; color: var(--texto); }
+.hoja[open] { animation: subir 0.22s ease-out; }
+.hoja::before { content: ""; display: block; width: 36px; height: 4px; margin: 6px auto 0; border-radius: 2px; background: var(--texto-3); }
 .hoja::backdrop { background: rgba(0, 0, 0, 0.6); }
+@keyframes subir { from { transform: translateY(40px); opacity: 0; } }
+.hoja-fila { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+a.boton { text-decoration: none; display: inline-block; }
 .opcion { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; color: var(--texto-2); }
 .opcion select, .opcion input[type=range] { padding: 9px; border-radius: 10px; background: var(--panel); border: 1px solid var(--panel-borde); }
+.opcion input[type=range] { accent-color: var(--cian); }
 .opcion b { color: var(--cian); }
 .hoja-botones { display: flex; justify-content: space-between; gap: 10px; margin-top: 16px; }
 
-.aviso { position: fixed; left: 16px; right: 16px; bottom: calc(92px + var(--abajo)); z-index: 40; padding: 12px 16px;
-         border-radius: 14px; background: #0b2738; border: 1px solid var(--cian); color: var(--texto); text-align: center;
-         box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5); }
+/* el cartelito de abajo (como los de Android), con un botón si hace falta («Actualizar»). (Se llama «cartel» y no
+   «aviso»: los mensajes de aviso de la charla también tienen la clase aviso, y con esto flotaban encima de todo) */
+.cartel { position: fixed; left: 12px; right: 12px; bottom: calc(86px + var(--abajo)); z-index: 40; display: flex; align-items: center;
+          gap: 12px; padding: 12px 16px; border-radius: 10px; background: #123a52; color: var(--texto); font-size: 16px;
+          line-height: 1.3; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.55); animation: subir 0.2s ease-out; }
+.cartel span { flex: 1; }
+.cartel button { flex: none; border: none; background: none; padding: 6px 4px; color: var(--cian-fuerte); font-family: var(--titulo);
+                 font-size: 12px; font-weight: 700; letter-spacing: 0.12em; }
