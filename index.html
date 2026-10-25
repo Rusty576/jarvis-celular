@@ -4,6 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <meta name="theme-color" content="#02070d">
+  <!-- Seguridad: solo corre lo de la app y solo habla con Google (el bot). Aunque algo raro se colara en un mensaje, no
+       podría correr código ni mandar tus datos a otro lado. (file: es la app de Android, que trae la página adentro) -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' file:; script-src 'self' file:; style-src 'self' file: 'unsafe-inline'; img-src 'self' file: data: blob:; font-src 'self' file:; media-src 'self' file: data: blob:; connect-src 'self' https://script.google.com https://script.googleusercontent.com data: blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'">
+  <meta name="referrer" content="no-referrer">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -79,17 +83,22 @@
     <div id="mensajes" class="mensajes"></div>
     <div id="foto-lista" class="foto-lista" hidden>
       <img id="foto-miniatura" alt="">
-      <span>Foto lista para mandar</span>
+      <span id="adjunto-texto">Foto lista para mandar</span>
       <button id="foto-sacar" class="icono-boton chico" aria-label="Sacar la foto">
         <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
       </button>
     </div>
     <form id="barra" class="barra" autocomplete="off">
-      <button type="button" id="boton-foto" class="icono-boton" aria-label="Mandar una foto">
-        <svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
+      <button type="button" id="boton-adjuntar" class="icono-boton" aria-label="Mandar una foto o un archivo">
+        <svg viewBox="0 0 24 24"><path d="M20 11.5l-7.8 7.8a5 5 0 0 1-7.1-7.1l8.3-8.3a3.4 3.4 0 0 1 4.8 4.8l-8.1 8.1a1.7 1.7 0 0 1-2.4-2.4l7.4-7.4"/></svg>
       </button>
-      <input id="foto" type="file" accept="image/*" hidden>
+      <input id="archivo" type="file" hidden
+             accept="image/*,application/pdf,audio/*,video/*,text/*,.txt,.md,.csv,.json">
       <textarea id="caja" rows="1" placeholder="Escribile a JARVIS..." enterkeyhint="send"></textarea>
+      <!-- llamar a JARVIS (manos libres): al lado del micrófono -->
+      <button type="button" id="boton-llamar" class="icono-boton llamar-chat" aria-label="Llamar a JARVIS">
+        <svg viewBox="0 0 24 24"><path d="M6.6 3.5l3 3.3-1.8 2.4a12 12 0 0 0 7 7l2.4-1.8 3.3 3-1.8 3.1C11 21 3 13 3.5 5.3z"/></svg>
+      </button>
       <button type="submit" id="boton-enviar" class="icono-boton principal" aria-label="Hablar o mandar">
         <svg class="si-vacio" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
         <svg class="si-texto" viewBox="0 0 24 24"><path d="M4 12l16-8-6 16-2-6z"/></svg>
@@ -133,17 +142,14 @@
   </section>
 </main>
 
-<!-- La barra de abajo, como la de Android: un ícono con su pastilla por pestaña (Llamar también, sin salirse de la
-     barra: antes el botón redondo tapaba lo de arriba) -->
+<!-- La barra de abajo, como la de Android: un ícono con su pastilla por pestaña. (Llamar está en la charla, al lado del
+     micrófono) -->
 <nav class="pestanas">
   <button data-vista="inicio" class="pestana activa">
     <span class="indicador"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg></span><span>Inicio</span>
   </button>
   <button data-vista="charla" class="pestana">
     <span class="indicador"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></svg></span><span>Charla</span>
-  </button>
-  <button id="boton-llamar" class="pestana llamar" aria-label="Llamar a JARVIS">
-    <span class="indicador"><svg viewBox="0 0 24 24"><path d="M6.6 3.5l3 3.3-1.8 2.4a12 12 0 0 0 7 7l2.4-1.8 3.3 3-1.8 3.1C11 21 3 13 3.5 5.3z"/></svg></span><span>Llamar</span>
   </button>
   <button data-vista="dia" class="pestana">
     <span class="indicador"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg></span><span>Mi día</span>
@@ -208,8 +214,39 @@
     </div>
     <!-- solo en la app de Android -->
     <div id="ajustes-nativos" hidden>
+      <!-- el cerebro sin internet: JARVIS piensa en el celular (como en la PC) -->
+      <div id="cerebro-caja" class="cerebro-caja" hidden>
+        <h3>CEREBRO SIN INTERNET</h3>
+        <p class="ayuda" id="cerebro-texto"></p>
+        <div class="progreso" id="cerebro-progreso" hidden><i></i></div>
+        <label class="opcion">El modelo
+          <select id="ajuste-modelo">
+            <option value="gemma4">Gemma 4 (2,6 GB): el mejor, como JARVIS en la PC</option>
+            <option value="qwen3">Qwen 3 (1 GB): liviano, para celulares con poca memoria</option>
+          </select>
+        </label>
+        <label class="interruptor"><input type="checkbox" id="ajuste-solo-wifi"><span>Bajarlo solo con wifi</span></label>
+        <div class="hoja-fila">
+          <button type="button" id="cerebro-bajar" class="boton principal">Bajar</button>
+          <button type="button" id="cerebro-cancelar" class="boton">Cancelar</button>
+          <button type="button" id="cerebro-borrar" class="boton peligro">Borrar</button>
+        </div>
+      </div>
       <label class="interruptor"><input type="checkbox" id="ajuste-avisos">
         <span>Avisarme los recordatorios desde el celular (suenan aunque no haya internet)</span></label>
+      <h3 class="titulo-ajuste">«HEY JARVIS»</h3>
+      <label class="opcion">Qué tan fácil se despierta
+        <select id="ajuste-sensibilidad">
+          <option value="alta">Fácil (si no te escucha)</option>
+          <option value="normal">Normal</option>
+          <option value="baja">Difícil (si se despierta solo)</option>
+        </select>
+      </label>
+      <label class="interruptor"><input type="checkbox" id="ajuste-pantalla-apagada">
+        <span>Escuchar también con la pantalla apagada (gasta más batería)</span></label>
+      <p class="ayuda">Se prende en Inicio. Si lo decís como en inglés («Jei Yárvis») te entiende mejor.
+        <b>Asistente del celular</b>: elegí JARVIS como «App de asistente digital» y, al mantener apretado el botón de inicio
+        (o el de encendido), se abre JARVIS escuchando en vez de Google.</p>
       <div class="hoja-fila">
         <button type="button" id="ajuste-asistente" class="boton">Asistente del celular</button>
         <button type="button" id="ajuste-permisos" class="boton">Permisos</button>

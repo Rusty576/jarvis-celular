@@ -5,15 +5,17 @@ Dos formas de tener a JARVIS en el celular, con la misma pantalla:
 - **La app de Android** (`android/JARVIS.apk`, el código está en `app_android/`): una app de verdad. Escucha y
   habla con la voz del celular. Llama a tus contactos por su nombre, pone alarmas y temporizadores, prende la
   linterna, cambia el volumen y abre cualquier app. Los recordatorios suenan aunque no haya internet, y se puede
-  elegir como asistente del celular.
+  elegir como asistente del celular. Además: «Hey Jarvis» con la app cerrada (como «Ok Google») y un cerebro que
+  contesta sin internet (Gemma, en el mismo celular).
 - **La web app** (esta carpeta): se instala desde Chrome, en Android o en iPhone. Hace lo mismo menos lo del
   teléfono: para abrir otra app hay que tocar un botón.
 
 Las pestañas:
 
 - **Inicio**: como JARVIS en la PC. Tocás HABLAR (o decís «Jarvis…» con el manos libres prendido) y los protocolos.
-- **Charla**: escribile, hablale o mandale una foto.
-- **Llamar**: manos libres. Te escucha, piensa y te contesta hablando, hasta que digas «chau».
+- **Charla**: escribile, hablale o mandale un archivo (el clip: fotos, PDF, audio, video o textos, hasta 15 MB).
+  Te hace documentos de Google Docs (botón para abrirlos) e imágenes (botón «Guardar imagen»). Al lado de mandar
+  está **Llamar** (el teléfono): manos libres, te escucha, piensa y te contesta hablando, hasta que digas «chau».
 - **Mi día**: el clima, tus recordatorios y tus pendientes.
 - **Mails**: los no leídos; te los lee, los resume o los contesta (mandar siempre con tu OK).
 
@@ -21,8 +23,9 @@ No tiene nada adentro: ni claves, ni direcciones, ni datos. Todo lo hace el bot 
 app se conecta con él con el link que manda `/app` en Telegram. La parte del link después del `#` (la dirección del
 bot y la llave) no viaja a ningún servidor y queda guardada solo en tu celular.
 
-Sin internet, lo que escribas queda en una cola y sale solo cuando vuelve. Lo del teléfono (abrir apps, llamar,
-alarmas, la hora) anda igual.
+Sin internet, en la app de Android contesta el cerebro del celular (si lo bajaste, en Ajustes); si no, lo que
+escribas queda en una cola y sale solo cuando vuelve. Lo del teléfono (abrir apps, llamar, alarmas, la hora) anda
+igual.
 
 ## Instalarla
 

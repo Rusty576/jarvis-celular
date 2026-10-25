@@ -182,7 +182,13 @@ h2 { font-family: var(--titulo); font-size: 12px; font-weight: 700; letter-spaci
 .foto-lista { display: flex; align-items: center; gap: 10px; margin: 0 12px; padding: 6px 10px; border-radius: 12px;
               background: var(--panel); border: 1px solid var(--panel-borde); color: var(--texto-2); font-size: 15px; }
 .foto-lista img { width: 44px; height: 44px; object-fit: cover; border-radius: 8px; }
-.foto-lista span { flex: 1; }
+.foto-lista span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msg .archivo-adjunto { display: block; margin-top: 4px; font-size: 15px; color: var(--texto-2); }
+/* llamar a JARVIS, en la barra de la charla (al lado del micrófono) */
+.icono-boton.llamar-chat { color: var(--verde); border-color: rgba(77, 255, 184, 0.45); }
+.icono-boton.llamar-chat svg { fill: currentColor; stroke: none; width: 22px; height: 22px; }
+.barra .icono-boton { width: 44px; height: 44px; }
+.barra { gap: 6px; padding: 10px 10px; }
 
 .barra { display: flex; align-items: flex-end; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--panel-borde);
          background: rgba(2, 7, 13, 0.9); }
@@ -244,7 +250,7 @@ h2 { font-family: var(--titulo); font-size: 12px; font-weight: 700; letter-spaci
 .pc-detalle { margin-top: 8px; color: var(--texto-2); line-height: 1.35; white-space: pre-wrap; }
 
 /* ---------- Las pestañas de abajo (como la barra de Android: el ícono en una pastilla) ---------- */
-.pestanas { flex: none; display: grid; grid-template-columns: repeat(5, 1fr); padding: 8px 4px calc(10px + var(--abajo));
+.pestanas { flex: none; display: grid; grid-template-columns: repeat(4, 1fr); padding: 8px 4px calc(10px + var(--abajo));
             border-top: 1px solid var(--panel-borde); background: #030d16; }
 .pestana { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 0 0 2px; border: none; border-radius: 14px;
            background: none; color: var(--texto-3); font-size: 12px; font-weight: 600; letter-spacing: 0.03em; }
@@ -307,6 +313,18 @@ h2 { font-family: var(--titulo); font-size: 12px; font-weight: 700; letter-spaci
 .hoja::backdrop { background: rgba(0, 0, 0, 0.6); }
 @keyframes subir { from { transform: translateY(40px); opacity: 0; } }
 .hoja-fila { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.titulo-ajuste { margin: 16px 0 8px; font-family: var(--titulo); font-size: 11px; font-weight: 700; letter-spacing: 0.25em;
+                 color: var(--cian); }
+.hoja .ayuda b { color: var(--texto); }
+/* el cerebro sin internet */
+.cerebro-caja { margin: 4px 0 14px; padding: 4px 14px 2px; border-radius: 14px; background: var(--cian-sutil);
+                border: 1px solid var(--panel-borde); }
+.cerebro-caja h3 { margin: 12px 0 4px; font-family: var(--titulo); font-size: 11px; font-weight: 700; letter-spacing: 0.25em;
+                   color: var(--cian); }
+.progreso { height: 8px; margin: 2px 0 14px; border-radius: 4px; background: var(--panel); overflow: hidden; }
+.progreso i { display: block; height: 100%; width: 0; border-radius: 4px; background: var(--cian); transition: width 0.4s; }
+.msg.jarvis.local { border-color: rgba(77, 255, 184, 0.35); }
+.msg.jarvis.local .quien { color: var(--verde); }
 a.boton { text-decoration: none; display: inline-block; }
 .opcion { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; color: var(--texto-2); }
 .opcion select, .opcion input[type=range] { padding: 9px; border-radius: 10px; background: var(--panel); border: 1px solid var(--panel-borde); }

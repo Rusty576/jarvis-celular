@@ -15,7 +15,7 @@
 // ============================================================
 "use strict";
 
-const VERSION_APP = "2026.10.25.1";
+const VERSION_APP = "2026.10.25.3";
 const ANDROID_WEB = "https://rusty576.github.io/jarvis-celular/android/";   // el APK y su version.json
 const $ = (id) => document.getElementById(id);
 const Reco = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -85,7 +85,8 @@ function guardar(clave, valor) {
 }
 
 const ajustes = Object.assign({leer: "auto", nombreVoz: "", velocidad: 1.05, idioma: "es-UY", musica: "youtube",
-                               escucharJarvis: false, avisos: true}, leerGuardado("ajustes", {}));
+                               escucharJarvis: false, avisos: true, modelo: "", soloWifi: true},
+                              leerGuardado("ajustes", {}));
 let conexion = leerGuardado("conexion", null);         // {u: la dirección del bot, k: la llave}
 let mensajes = leerGuardado("mensajes", []);           // la charla, como se ve en este celular
 let ultimaCharla = leerGuardado("ultimaCharla", null); // el último mensaje de la charla del bot que ya está acá
@@ -221,6 +222,7 @@ let mandandoCola = false;
 async function mandarCola() {
   if (mandandoCola || !cola.length || !conexion || !hayInternet()) return;
   mandandoCola = true;
+  let charlados = 0, anotados = 0;
   try {
     while (cola.length) {
       const p = cola[0];
@@ -233,10 +235,14 @@ async function mandarCola() {
       }
       cola.shift();
       guardar("cola", cola);
-      if (p.accion === "app_mensaje") {
+      if (p.silencioso) {   // lo que ya se anotó en el celular sin internet: ahora lo sabe también el bot (y la PC)
+        anotados++;
+      } else if (p.accion === "app_mensaje") {
+        charlados++;
         const respuesta = r.ok ? (r.mensajes || []).join("\n\n") : (r.error || "No pude.");
+        const imagen = await prepararImagenes(r.acciones || []);
         agregar({quien: "jarvis", texto: "⏳ «" + p.datos.texto + "»\n\n" + respuesta, tarjetas: r.tarjetas || [],
-                 acciones: r.acciones || []});
+                 acciones: r.acciones || [], imagen: imagen});
         if (r.acciones && r.acciones.length) await hacerAcciones(r.acciones);
       } else if (r.ok && r.pendientes) {
         datosDia = r;
@@ -244,7 +250,8 @@ async function mandarCola() {
         pintarDia();
       }
     }
-    if (!cola.length) avisar("Ya mandé lo que me pediste sin internet.", 3);
+    if (!cola.length && charlados) avisar("Ya mandé lo que me pediste sin internet.", 3);
+    if (anotados) cargarDatos();   // Mi día, con lo del bot (que ya tiene lo anotado)
   } finally {
     mandandoCola = false;
   }
@@ -364,6 +371,40 @@ const Voz = {
     this.turno++;
     if (Nativo.hay) window.JarvisNativo.callar();
     else if (window.speechSynthesis) speechSynthesis.cancel();
+  },
+
+  enPartes() {
+    // Para el cerebro del celular, que va escribiendo: cada frase se dice apenas está completa (Android las pone en
+    // fila). agregar(pedazo) con lo nuevo; terminar() dice lo que falta y espera a que termine de hablar
+    this.callar();
+    const mio = this.turno;
+    let resto = "", ultima = Promise.resolve(), primera = true;
+    const decir = (frase) => {
+      const limpio = this.limpiar(frase);
+      if (!limpio || mio !== this.turno) return;
+      ultima = Nativo.cuando(primera ? "hablar" : "hablarMas", limpio, ajustes.velocidad, ajustes.nombreVoz || "");
+      primera = false;
+    };
+    return {
+      agregar: (pedazo) => {
+        resto += pedazo;
+        for (;;) {   // la primera frase de al menos 12 letras que ya terminó (las cortitas van con la siguiente)
+          const fin = /[.!?…:;](?=\s)/g;
+          let corte = -1, x;
+          while ((x = fin.exec(resto))) {
+            if (x.index + 1 >= 12) { corte = x.index + 1; break; }
+          }
+          if (corte < 0) break;
+          decir(resto.slice(0, corte));
+          resto = resto.slice(corte).replace(/^\s+/, "");
+        }
+      },
+      terminar: async () => {
+        if (resto.trim()) decir(resto);
+        resto = "";
+        await ultima;
+      },
+    };
   },
 };
 Nativo.al("voz", (d) => { if (d.estado === "palabra") vozReactores(0.55 + Math.random() * 0.35); });
@@ -612,6 +653,9 @@ function accionAUrl(a) {
             url: a.numero ? `https://wa.me/${a.numero}?text=${texto}` : `https://wa.me/?text=${texto}`};
   }
   if (a.tipo === "llamar") return {texto: `Llamar${a.para ? " a " + a.para : ""}`, url: "tel:" + a.numero};
+  if (a.tipo === "abrir_url") {   // (solo páginas https: nada de intent: ni javascript: que mande el bot)
+    return {texto: a.texto || "Abrir", url: /^https:\/\//.test(a.url || "") ? a.url : "about:blank"};
+  }
   if (a.tipo === "musica") {
     const donde = {youtube: APPS.youtube, ytmusic: APPS["youtube music"], spotify: APPS.spotify}[ajustes.musica] || APPS.youtube;
     return {texto: `Poner «${a.busqueda}» en ${donde.nombre}`, url: donde.buscar(q)};
@@ -793,10 +837,60 @@ async function hacerEnElTelefono(a) {
   return {ok: false, texto: ""};
 }
 
+const imagenesGrandes = new Map();   // las imágenes que hizo JARVIS, enteras (en la charla queda una chica)
+
+async function prepararImagenes(acciones) {
+  // Una imagen que hizo JARVIS: en la charla, una copia chica (la grande no entra en lo guardado del celular); la
+  // grande queda a mano para «Guardar»
+  let miniatura = null;
+  for (const a of acciones) {
+    if (a.tipo !== "imagen" || !a.datos) continue;
+    const ref = "img" + Date.now() + Math.random().toString(36).slice(2, 6);
+    imagenesGrandes.set(ref, {mime: a.mime, datos: a.datos});
+    try {
+      miniatura = await miniaturaDe(await (await fetch(`data:${a.mime};base64,${a.datos}`)).blob());
+    } catch (e) { /* sin miniatura: queda el botón */ }
+    delete a.datos;
+    a.ref = ref;
+  }
+  return miniatura;
+}
+
+async function miniaturaDe(blob) {
+  // (más grande que la de las fotos que mandás: es para verla en la charla)
+  const img = await new Promise((listo, error) => {
+    const i = new Image();
+    i.onload = () => listo(i);
+    i.onerror = error;
+    i.src = URL.createObjectURL(blob);
+  });
+  const escala = Math.min(1, 640 / Math.max(img.naturalWidth, img.naturalHeight));
+  const lienzo = document.createElement("canvas");
+  lienzo.width = Math.round(img.naturalWidth * escala);
+  lienzo.height = Math.round(img.naturalHeight * escala);
+  lienzo.getContext("2d").drawImage(img, 0, 0, lienzo.width, lienzo.height);
+  URL.revokeObjectURL(img.src);
+  return lienzo.toDataURL("image/jpeg", 0.8);
+}
+
+function guardarImagen(a) {
+  const grande = imagenesGrandes.get(a.ref);
+  if (!grande) return avisar("Esa imagen ya no la tengo entera: pedímela de nuevo.", 4);
+  if (Nativo.hay) {
+    const r = Nativo.ya("guardarImagen", grande.datos, grande.mime);
+    return avisar(r.ok ? "Guardada en la galería (carpeta JARVIS)." : "No pude guardarla en este celular.", 4);
+  }
+  const enlace = document.createElement("a");   // en la web: se baja
+  enlace.href = `data:${grande.mime};base64,${grande.datos}`;
+  enlace.download = "jarvis." + (grande.mime.split("/")[1] || "png");
+  enlace.click();
+}
+
 async function hacerAcciones(acciones) {
   // Lo que pidió el bot: en Android se hace ya; en la web, solo si recién tocaste algo (si no, queda el botón).
-  // Devuelve el problema, si hubo (por ejemplo, un contacto que no está)
-  if (!acciones || !acciones.length) return null;
+  // (Un documento o una imagen: solo el botón.) Devuelve el problema, si hubo (por ejemplo, un contacto que no está)
+  acciones = (acciones || []).filter((a) => a.tipo !== "abrir_url" && a.tipo !== "imagen");
+  if (!acciones.length) return null;
   if (!Nativo.hay) {
     if (Date.now() - ultimoToque < 4500) abrirUrl(accionAUrl(acciones[0]).url);
     return null;
@@ -814,7 +908,14 @@ function pintarAcciones(contenedor, acciones) {
   (acciones || []).forEach((a) => {
     const boton = document.createElement("button");
     boton.className = "accion";
-    if (Nativo.hay) {   // (ya se hizo solo: el botón es para repetirlo)
+    if (a.tipo === "imagen") {
+      boton.textContent = "⤓ Guardar imagen";
+      boton.onclick = () => guardarImagen(a);
+    } else if (a.tipo === "abrir_url") {   // un documento que hizo JARVIS
+      const {texto, url} = accionAUrl(a);
+      boton.textContent = "▶ " + texto;
+      boton.onclick = () => abrirUrl(url);
+    } else if (Nativo.hay) {   // (ya se hizo solo: el botón es para repetirlo)
       boton.textContent = "▶ " + textoDeAccion(a);
       boton.onclick = () => hacerEnElTelefono(a).then((r) => { if (r.texto) avisar(r.texto, 2.5); });
     } else {
@@ -864,7 +965,8 @@ function duracionDe(t) {
 
 function horaDicha(t) {
   // "7", "7:30", "7 y media", "las 9 de la noche", "19", "8 menos cuarto" -> "HH:MM"
-  const m = /(\d{1,2})(?:[:.](\d{2}))?(?:\s*(?:y\s*(media|cuarto)|menos\s*cuarto))?\s*(am|pm|de la manana|de la tarde|de la noche|de la madrugada)?/.exec(t);
+  // (los minutos pueden venir como "7:30" o, ya sin signos, "7 30")
+  const m = /(\d{1,2})(?:(?:[:.]|\s+)(\d{2})(?!\d))?(?:\s*(?:y\s*(media|cuarto)|menos\s*cuarto))?\s*(am|pm|de la manana|de la tarde|de la noche|de la madrugada)?/.exec(t);
   if (!m) return null;
   let h = Number(m[1]), min = m[2] ? Number(m[2]) : 0;
   if (m[3] === "media") min = 30;
@@ -947,6 +1049,274 @@ async function hacerLocal(texto) {
 }
 
 
+// ---------- El cerebro del celular: sin internet, JARVIS piensa en el celular (como en la PC, con Gemma) ----------
+// En la app de Android: Gemma 4 corre en el teléfono (se baja una vez, con wifi). Sabe lo que el celular tiene guardado
+// (tus recuerdos, pendientes, recordatorios, el último clima, la PC). Con internet contesta Gemini, como siempre.
+
+const MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre",
+               "noviembre", "diciembre"];
+
+const Cerebro = {
+  alPedazo: null,   // a quién le va pasando lo que escribe
+
+  estado() {
+    if (!Nativo.hay) return null;
+    try {
+      return Nativo.ya("cerebroEstado");
+    } catch (e) {
+      return null;   // (una app vieja, sin cerebro)
+    }
+  },
+
+  modelo() {
+    // el que elegiste; si no, Gemma 4 (o el liviano, si el celular tiene poca memoria)
+    return ajustes.modelo || (Nativo.info.ram && Nativo.info.ram < 5 ? "qwen3" : "gemma4");
+  },
+
+  info() {
+    const e = this.estado();
+    return e && e.modelos ? e.modelos.find((m) => m.id === this.modelo()) || null : null;
+  },
+
+  listo() {
+    const m = this.info();
+    return !!(m && m.listo);
+  },
+
+  bajar() {
+    return Nativo.ya("cerebroBajar", this.modelo(), ajustes.soloWifi !== false);
+  },
+
+  preparar() {
+    if (this.listo()) window.JarvisNativo.cerebroPreparar(this.modelo());
+  },
+
+  parar() {
+    if (Nativo.hay && window.JarvisNativo.cerebroParar) window.JarvisNativo.cerebroParar();
+  },
+
+  async preguntar(texto, alPedazo) {
+    this.alPedazo = alPedazo;
+    try {
+      return await Nativo.cuando("cerebroPreguntar", this.modelo(), sistemaDelCelular(), claveDelCelular(),
+                                 JSON.stringify(historiaDelCelular()), texto, 400);
+    } finally {
+      this.alPedazo = null;
+    }
+  },
+};
+Nativo.al("cerebro", (d) => { if (Cerebro.alPedazo) Cerebro.alPedazo(d.pedazo); });
+
+function horaLinda(fecha) {
+  return String(fecha.getHours()).padStart(2, "0") + ":" + String(fecha.getMinutes()).padStart(2, "0");
+}
+
+function cuandoLindo(iso) {
+  // "2026-10-26T09:00" -> "mañana a las 09:00" (calculado ahora: lo guardado puede ser de ayer)
+  const f = new Date(String(iso).slice(0, 16));
+  if (isNaN(f)) return String(iso);
+  const hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+  const dias = Math.round((new Date(f.getFullYear(), f.getMonth(), f.getDate()) - hoy) / 86400000);
+  const dia = dias === 0 ? "hoy" : dias === 1 ? "mañana" : dias === -1 ? "ayer"
+    : `el ${DIAS[f.getDay()]} ${f.getDate()}/${f.getMonth() + 1}`;
+  return `${dia} a las ${horaLinda(f)}`;
+}
+
+function sistemaDelCelular() {
+  // Quién es y lo que sabe (lo que el celular tiene guardado), como lo lee el cerebro del celular
+  const d = datosDia || {};
+  const ahora = new Date();
+  const lineas = [
+    "Sos J.A.R.V.I.S., el asistente personal del usuario, y le hablás desde su celular. Ahora estás funcionando "
+      + "adentro del celular, sin internet.",
+    "Hablá en español rioplatense (voseo: «tenés», «querés»), cálido y breve: de una a cuatro oraciones, como se habla "
+      + "en voz alta, sin listas, sin asteriscos y sin emojis.",
+    "Preguntas sobre el mundo (historia, ciencia, geografía, libros, idiomas, cuentas, recetas, consejos, cómo hacer "
+      + "algo): contestalas con lo que sabés, directo, como siempre. Para eso no hace falta internet: no lo menciones.",
+    "Sobre su vida, usá solo lo que está abajo; si no está, decí que no lo sabés. Sin internet no podés ver datos que "
+      + "cambian (precios, cotizaciones, noticias, resultados de partidos), sus mails ni mandarle órdenes a la PC: eso, "
+      + "cuando vuelva internet.",
+    `Hoy es ${DIAS[ahora.getDay()]} ${ahora.getDate()} de ${MESES[ahora.getMonth()]} de ${ahora.getFullYear()}. `
+      + `Cuando empezó esta charla eran las ${horaLinda(ahora)}.`,
+  ];
+  const recuerdos = (d.recuerdos || []).slice(-40);
+  if (recuerdos.length) lineas.push("", "Lo que sabés del usuario:", ...recuerdos.map((r) => "- " + r));
+  const pendientes = d.pendientes || [];
+  lineas.push("Sus pendientes: " + (pendientes.length ? pendientes.map((p) => p.texto.replace(/ ⏳$/, "")
+    + (p.para ? ` (para ${fechaLinda(p.para)})` : "")).join("; ") : "ninguno") + ".");
+  const recordatorios = (d.recordatorios || []).filter((r) => new Date(String(r.cuando).slice(0, 16)) > ahora);
+  lineas.push("Sus recordatorios: " + (recordatorios.length ? recordatorios.map((r) => `${cuandoLindo(r.cuando)}, ${r.texto}`)
+    .join("; ") : "ninguno") + ".");
+  if (d.clima) {
+    // cada día con su nombre de hoy («mañana (lunes 26)») y sin los que ya pasaron: así no se confunde
+    const c = d.clima, hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+    const dias = c.dias.map((x) => {
+      const f = new Date(x.fecha + "T12:00");
+      const dif = Math.round((new Date(f.getFullYear(), f.getMonth(), f.getDate()) - hoy) / 86400000);
+      if (dif < 0) return null;
+      const dia = `${DIAS[f.getDay()]} ${f.getDate()}`;
+      return `${dif === 0 ? `hoy (${dia})` : dif === 1 ? `mañana (${dia})` : `el ${dia}`}: de ${x.minima} a ${x.maxima} grados, `
+        + `${x.lluvia} por ciento de probabilidad de lluvia`;
+    }).filter(Boolean);
+    const visto = d.ahora ? cuandoLindo(d.ahora) : "hace un rato";
+    lineas.push(`El pronóstico en ${c.lugar} (visto ${visto}, cuando hacía ${c.ahora.temperatura} grados y estaba `
+      + `${c.ahora.cielo}): ${dias.length ? dias.join("; ") : "no hay de estos días"}.`);
+  }
+  if (d.pc && !d.pc.nota) lineas.push(`Su PC: la última vez estaba ${d.pc.prendida ? "prendida" : "apagada"}.`);
+  return lineas.join("\n");
+}
+
+function claveDelCelular() {
+  // Cambia cuando cambia lo que sabe (otro día, o se actualizó Mi día): entonces el cerebro arma la charla de nuevo
+  const d = datosDia || {};
+  return [new Date().toDateString(), d.ahora || "", (d.pendientes || []).length, (d.recordatorios || []).length,
+          (d.recuerdos || []).length].join("|");
+}
+
+function historiaDelCelular() {
+  // Lo último de la charla (sin el mensaje que se está contestando), para que siga el hilo
+  const lista = mensajes.slice(0, -1).filter((m) => (m.quien === "vos" || m.quien === "jarvis") && m.texto)
+    .slice(-6).map((m) => ({r: m.quien === "vos" ? "user" : "model", t: m.texto.replace(/^🎙️ /, "")}));
+  const limpia = [];
+  lista.forEach((m) => {
+    if (limpia.length && limpia[limpia.length - 1].r === m.r) limpia[limpia.length - 1].t += "\n" + m.t;
+    else if (limpia.length || m.r === "user") limpia.push(m);
+  });
+  // las viejas, cortitas (la última va entera: así sabe que la charla sigue desde ahí)
+  return limpia.map((m, i) => (i < limpia.length - 1 ? {r: m.r, t: m.t.slice(0, 400)} : m));
+}
+
+// Lo que cambia datos (pendientes, recordatorios, recuerdos): sin internet se hace igual en el celular, y cuando
+// vuelve internet se le pasa al bot solo, sin avisar (así queda también en la PC y en Telegram)
+const paraAnotar = (t) => String(t || "").trim().replace(/^jarvis[,\s]+/i, "").replace(/[.!¡¿?]+$/g, "").trim();
+
+function cuandoDelRecordatorio(t) {
+  // "mañana a las 9 llamar al dentista" -> {fecha, texto}. null si no dice cuándo
+  let resto = " " + t + " ";
+  const ahora = new Date();
+  let fecha = null, hora = null;
+  const en = /\s(?:en|dentro de)\s+((?:\d+|un|una|media)\s*(?:horas?|h|minutos?|min)(?:\s+y\s+(?:media|\d+\s*minutos?))?)\s/i.exec(resto);
+  if (en) {
+    const s = duracionDe(normalizar(en[1]));
+    if (s) {
+      fecha = new Date(ahora.getTime() + s * 1000);
+      resto = resto.replace(en[0], " ");
+    }
+  }
+  if (!fecha) {
+    // primero la hora (así «9 de la mañana» no se confunde con el día de mañana), después el día
+    const lahora = /\s(?:a\s+las?|tipo|para\s+las?)\s+(\d{1,2}(?:[:.]\d{2})?(?:\s*y\s*(?:media|cuarto)|\s*menos\s*cuarto)?(?:\s*(?:am|pm|de\s+la\s+(?:ma[ñn]ana|tarde|noche|madrugada)))?)\s/i.exec(resto);
+    if (lahora) {
+      hora = horaDicha(normalizar(lahora[1]));
+      resto = resto.replace(lahora[0], " ");
+    }
+    const dia = /\s(hoy|pasado\s+ma[ñn]ana|ma[ñn]ana|el\s+(lunes|martes|mi[ée]rcoles|jueves|viernes|s[áa]bado|domingo))\s/i.exec(resto);
+    if (dia) {
+      resto = resto.replace(dia[0], " ");
+      fecha = new Date(ahora);
+      const d = normalizar(dia[1]);
+      if (d.startsWith("pasado")) fecha.setDate(fecha.getDate() + 2);
+      else if (d.startsWith("manana")) fecha.setDate(fecha.getDate() + 1);
+      else if (dia[2]) {
+        const quiere = ["domingo", "lunes", "martes", "miercoles", "jueves", "viernes", "sabado"].indexOf(normalizar(dia[2]));
+        fecha.setDate(fecha.getDate() + ((quiere - fecha.getDay() + 7) % 7 || 7));
+      }
+    }
+    if (!fecha && !hora) return null;
+    const [h, m] = (hora || "09:00").split(":").map(Number);   // (un día sin hora: a las 9, como en la PC)
+    if (!fecha) {
+      fecha = new Date(ahora);
+      fecha.setHours(h, m, 0, 0);
+      if (fecha <= ahora) fecha.setDate(fecha.getDate() + 1);   // (esa hora ya pasó hoy: mañana)
+    } else {
+      fecha.setHours(h, m, 0, 0);
+    }
+  }
+  const texto = resto.replace(/\s+/g, " ").trim().replace(/^(?:que|de|para|el|la)\s+/i, "").trim();
+  return texto ? {fecha, texto: texto.charAt(0).toUpperCase() + texto.slice(1)} : null;
+}
+
+function isoLocal(f) {
+  const d = (n) => String(n).padStart(2, "0");
+  return `${f.getFullYear()}-${d(f.getMonth() + 1)}-${d(f.getDate())}T${d(f.getHours())}:${d(f.getMinutes())}`;
+}
+
+function datoSinInternet(texto) {
+  // {texto} si era para anotar algo (y ya quedó anotado en el celular); null si es para pensar
+  const t = paraAnotar(texto);
+  if (!datosDia) datosDia = {pendientes: [], recordatorios: [], recuerdos: []};
+  const sincronizar = () => encolar({accion: "app_mensaje", datos: {texto: t}, silencioso: true});
+  let m = /^(?:agreg[aá](?:me)?|anot[aá](?:me)?|sum[aá](?:me)?|pon[eé](?:me)?)\s+(.+?)\s+(?:a|en)\s+(?:mis\s+|los\s+|la\s+lista\s+de\s+)?pendientes$/i.exec(t);
+  if (m) {
+    const p = m[1].charAt(0).toUpperCase() + m[1].slice(1);
+    datosDia.pendientes.push({id: "cel" + Date.now(), texto: p, para: null});
+    guardar("dia", datosDia);
+    pintarDia();
+    encolar({accion: "app_pendiente", datos: {que: "agregar", texto: p}, silencioso: true});
+    return `Listo, agregué «${p}» a tus pendientes.`;
+  }
+  m = /^acord[aá]te\s+(?:de\s+)?que\s+(.+)$/i.exec(t);
+  if (m) {
+    datosDia.recuerdos = (datosDia.recuerdos || []).concat(m[1]);
+    guardar("dia", datosDia);
+    sincronizar();
+    return "Dale, me lo acuerdo.";
+  }
+  m = /^(?:record[aá]me|acord[aá]me|avis[aá]me)\s+(.+)$/i.exec(t);
+  if (m) {
+    const r = cuandoDelRecordatorio(m[1]);
+    if (!r) return "¿Para cuándo? Decímelo así: «recordame mañana a las 9 llamar al dentista».";
+    datosDia.recordatorios = (datosDia.recordatorios || []).concat({id: "cel" + Date.now(), cuando: isoLocal(r.fecha),
+                                                                     texto: r.texto, falta: cuandoLindo(isoLocal(r.fecha))});
+    guardar("dia", datosDia);
+    pintarDia();
+    programarAvisos();   // suena desde el celular a esa hora, haya o no internet
+    sincronizar();
+    return `Listo, te lo recuerdo ${cuandoLindo(isoLocal(r.fecha))}: ${r.texto}.`;
+  }
+  return null;
+}
+
+async function contestarEnElCelular(texto, opciones) {
+  // Sin internet (o si Google no contesta): lo piensa el cerebro del celular, que va escribiendo (y, si le estás
+  // hablando, lo va diciendo frase por frase). opciones: {hablarYa, alEscribir, porVoz, sinVoz, llamada}
+  pensando(true);
+  const voz = opciones.hablarYa ? Voz.enPartes() : null;
+  let escrito = "", burbuja = null;
+  const r = await Cerebro.preguntar(texto, (pedazo) => {
+    if (!burbuja) {
+      pensando(false);
+      agregar({quien: "jarvis", texto: "", local: true});
+      burbuja = $("mensajes").lastElementChild.querySelector("span:last-child");
+    }
+    escrito += pedazo;
+    burbuja.textContent = escrito;
+    bajar();
+    if (opciones.alEscribir) opciones.alEscribir(escrito);
+    if (voz) voz.agregar(pedazo);
+  });
+  pensando(false);
+  const respuesta = (r.texto || escrito).trim();
+  if (!respuesta) {
+    const aviso = "El cerebro del celular no pudo contestar" + (r.error ? ` (${r.error})` : "") + ". Probá de nuevo.";
+    agregar({quien: "aviso", texto: aviso});
+    return {texto: aviso, tarjetas: [], acciones: [], error: true};
+  }
+  if (!burbuja) agregar({quien: "jarvis", texto: respuesta, local: true});
+  else {
+    mensajes[mensajes.length - 1].texto = respuesta;
+    guardar("mensajes", mensajes);
+  }
+  if (voz) await voz.terminar();
+  else if (!opciones.sinVoz && !opciones.llamada && (ajustes.leer === "siempre" || (ajustes.leer === "auto" && opciones.porVoz))) {
+    Voz.decir(respuesta);
+  }
+  return {texto: respuesta, tarjetas: [], acciones: [], local: true, dicho: !!voz};
+}
+
+
 // ---------- La charla ----------
 
 function escapar(texto) {
@@ -961,11 +1331,11 @@ function conFormato(texto) {
 
 function pintarMensaje(m, indice) {
   const div = document.createElement("div");
-  div.className = "msg " + m.quien;
+  div.className = "msg " + m.quien + (m.local ? " local" : "");
   if (m.quien !== "aviso") {
     const quien = document.createElement("span");
     quien.className = "quien";
-    quien.textContent = m.quien === "vos" ? "VOS" : "JARVIS";
+    quien.textContent = m.quien === "vos" ? "VOS" : m.local ? "JARVIS · SIN INTERNET" : "JARVIS";
     div.appendChild(quien);
   }
   const texto = document.createElement("span");
@@ -976,6 +1346,12 @@ function pintarMensaje(m, indice) {
     img.className = "foto";
     img.src = m.imagen;
     div.appendChild(img);
+  }
+  if (m.archivo) {
+    const archivo = document.createElement("span");
+    archivo.className = "archivo-adjunto";
+    archivo.textContent = "📄 " + m.archivo;
+    div.appendChild(archivo);
   }
   if (m.acciones && m.acciones.length) {
     const caja = document.createElement("div");
@@ -1069,42 +1445,77 @@ function pensando(si) {
 }
 
 async function mandar(texto, opciones = {}) {
-  // Le manda algo a JARVIS y muestra la respuesta. opciones: {foto, audio, llamada, porVoz, sinVoz}
+  // Le manda algo a JARVIS y muestra la respuesta. opciones: {foto, archivo, audio, llamada, porVoz, sinVoz}
   // Devuelve siempre {texto, tarjetas, acciones}: si falló, texto es el motivo de verdad (y error: true)
-  const foto = opciones.foto || null;
-  const mio = agregar({quien: "vos", texto: texto || (opciones.audio ? "🎙️ ..." : ""), imagen: foto ? foto.miniatura : null});
-  const local = !foto && !opciones.audio && texto ? await hacerLocal(texto) : null;   // «abrí WhatsApp», «linterna»: al toque
+  const foto = opciones.foto || null, archivo = opciones.archivo || null;
+  const mio = agregar({quien: "vos", texto: texto || (opciones.audio ? "🎙️ ..." : ""), imagen: foto ? foto.miniatura : null,
+                       archivo: archivo ? archivo.nombre : null});
+  // un archivo de texto, sin internet: lo lee el cerebro del celular
+  const textoDelArchivo = archivo && !hayInternet() ? leerTexto(archivo) : null;
+  const local = !foto && !archivo && !opciones.audio && texto ? await hacerLocal(texto) : null;   // «abrí WhatsApp», «linterna»: al toque
   if (local) {
     agregar({quien: "jarvis", texto: local.texto, acciones: local.acciones});
     return {texto: local.texto, tarjetas: [], acciones: local.acciones, local: true};
   }
   const sinInternet = () => {
-    // sin internet: lo escrito queda en la cola y sale solo cuando vuelve (una foto o una grabación, no: pesan mucho)
-    if (foto || opciones.audio) {
-      return "No hay internet, así que no pude mandarte " + (foto ? "la foto" : "la grabación") + ". Probá cuando vuelva.";
+    // sin internet y sin el cerebro del celular: lo escrito queda en la cola y sale solo cuando vuelve
+    if (foto || archivo || opciones.audio) {
+      return "No hay internet, así que no pude mandarte " + (foto ? "la foto" : archivo ? "el archivo" : "la grabación")
+        + ". Probá cuando vuelva." + (archivo ? " (Sin internet leo archivos de texto, no PDFs ni audios.)" : "");
     }
     encolar({accion: "app_mensaje", datos: {texto: texto}});
-    return "No hay internet. Te lo mando apenas vuelva.";
+    return "No hay internet. Te lo mando apenas vuelva." + (Nativo.hay && Cerebro.estado()
+      ? " (Para que te conteste sin internet, bajá el cerebro del celular: Ajustes › Cerebro sin internet.)" : "");
+  };
+  const soloTexto = (texto && !foto && !archivo && !opciones.audio) || !!textoDelArchivo;
+  const enElCelular = async (motivo) => {
+    // anotar algo se hace igual (y se sincroniza solo después); lo demás lo piensa el cerebro del celular
+    if (textoDelArchivo) {
+      if (!Cerebro.listo()) return null;
+      return contestarEnElCelular((texto || "Resumime este archivo en pocas líneas.") + `\n\n(Archivo «${archivo.nombre}»:)\n`
+                                  + textoDelArchivo, opciones);
+    }
+    const dato = Nativo.hay ? datoSinInternet(texto) : null;
+    if (dato) {
+      agregar({quien: "jarvis", texto: dato, local: true});
+      if (!opciones.llamada && !opciones.sinVoz && (ajustes.leer === "siempre" || (ajustes.leer === "auto" && opciones.porVoz))) {
+        Voz.decir(dato);
+      }
+      return {texto: dato, tarjetas: [], acciones: [], local: true};
+    }
+    if (!Cerebro.listo()) return null;
+    if (motivo) agregar({quien: "aviso", texto: motivo});
+    return contestarEnElCelular(texto, opciones);
   };
   if (!hayInternet()) {
+    const r = soloTexto ? await enElCelular() : null;
+    if (r) return r;
     const aviso = sinInternet();
     agregar({quien: "aviso", texto: "⏳ " + aviso});
-    return {texto: aviso, tarjetas: [], acciones: [], error: true, enCola: !foto && !opciones.audio};
+    return {texto: aviso, tarjetas: [], acciones: [], error: true, enCola: soloTexto};
   }
   pensando(true);
   try {
     const r = await api("app_mensaje", {texto: texto || "", llamada: !!opciones.llamada, audio: opciones.audio || null,
-                                         imagen: foto ? {mime: "image/jpeg", datos: foto.datos} : null});
+                                         imagen: foto ? {mime: "image/jpeg", datos: foto.datos} : null,
+                                         archivo: archivo ? {mime: archivo.mime, datos: archivo.datos, nombre: archivo.nombre} : null},
+                        archivo ? 180 : 100);
     if (r.pedido && !texto) {   // lo que entendió de la grabación, o lo que se preguntó de la foto
       mio.texto = (opciones.audio ? "🎙️ " : "") + r.pedido;
       guardar("mensajes", mensajes);
       pintarCharla();
     }
     if (!r.ok) throw new ErrorJarvis("bot", r.error === "mensaje vacío" ? "No te escuché bien. ¿Me lo repetís?" : (r.error || "No pude."));
+    if (r.sin_cerebro && soloTexto) {   // Gemini no contestó (sin cupo, saturado): contesta el cerebro del celular
+      pensando(false);
+      const local = await enElCelular("Gemini no está contestando ahora: te contesto desde el celular.");
+      if (local) return local;
+    }
     let respuesta = (r.mensajes || []).join("\n\n");
     const acciones = r.acciones || [];
+    const imagen = await prepararImagenes(acciones);   // (una imagen que hizo JARVIS)
     pensando(false);
-    agregar({quien: "jarvis", texto: respuesta, tarjetas: r.tarjetas || [], acciones: acciones});
+    agregar({quien: "jarvis", texto: respuesta, tarjetas: r.tarjetas || [], acciones: acciones, imagen: imagen});
     const problema = await hacerAcciones(acciones);   // abrir la app, llamar, la alarma...
     if (problema) {
       agregar({quien: "aviso", texto: problema});
@@ -1117,6 +1528,11 @@ async function mandar(texto, opciones = {}) {
     return {texto: respuesta, tarjetas: r.tarjetas || [], acciones: acciones, pedido: r.pedido};
   } catch (e) {
     pensando(false);
+    if (soloTexto && ["sin_red", "servidor", "http", "no_json", "tiempo"].includes(e.tipo)) {
+      // se cortó internet, o Google no contesta: contesta el celular (si tiene el cerebro bajado)
+      const r = await enElCelular(e.tipo === "sin_red" ? null : e.message.replace(/\s*Probá.*$/, "") + " Te contesto desde el celular.");
+      if (r) return r;
+    }
     const aviso = e.tipo === "sin_red" ? sinInternet() : e.message;
     agregar({quien: "aviso", texto: (e.tipo === "sin_red" ? "⏳ " : "") + aviso});
     return {texto: aviso, tarjetas: [], acciones: [], error: true};
@@ -1158,26 +1574,68 @@ async function sincronizarCharla(datos) {
 }
 
 
-// ---------- La barra de abajo de la charla: escribir, hablar y fotos ----------
+// ---------- La barra de abajo de la charla: escribir, hablar, adjuntar y llamar ----------
 
-let fotoLista = null;   // {datos (base64), miniatura (dataURL)}
+let adjuntoListo = null;   // {tipo: "foto", datos, miniatura} o {tipo: "archivo", mime, datos, nombre, tam}
 let dictando = false;
+const MAX_ARCHIVO = 15 * 1024 * 1024;   // (lo mismo que acepta el bot)
 
 function ajustarCaja() {
   const caja = $("caja");
   caja.style.height = "auto";
   caja.style.height = Math.min(caja.scrollHeight, 130) + "px";
-  $("barra").classList.toggle("con-texto", caja.value.trim() !== "" || fotoLista !== null);
+  $("barra").classList.toggle("con-texto", caja.value.trim() !== "" || adjuntoListo !== null);
 }
 
 async function enviarLoEscrito() {
   const texto = $("caja").value.trim();
-  if (!texto && !fotoLista) return dictar();
-  const foto = fotoLista;
+  if (!texto && !adjuntoListo) return dictar();
+  const adjunto = adjuntoListo;
   $("caja").value = "";
   sacarFoto();
   ajustarCaja();
-  await mandar(texto, {foto: foto});
+  await mandar(texto, adjunto && adjunto.tipo === "foto" ? {foto: adjunto} : {archivo: adjunto});
+}
+
+function tamanoLindo(bytes) {
+  return bytes < 1024 * 1024 ? Math.max(1, Math.round(bytes / 1024)) + " KB" : (bytes / 1024 / 1024).toFixed(1).replace(".", ",") + " MB";
+}
+
+async function prepararAdjunto(archivo) {
+  // Una foto se achica (como mucho 1280 de lado); lo demás (PDF, audio, video, texto) va tal cual, hasta 15 MB
+  if (/^image\/(jpeg|png|webp|heic|heif)$/.test(archivo.type)) return Object.assign({tipo: "foto"}, await prepararFoto(archivo));
+  if (archivo.size > MAX_ARCHIVO) throw new Error(`Es muy grande (${tamanoLindo(archivo.size)}): hasta 15 MB.`);
+  const datos = await new Promise((listo, error) => {
+    const lector = new FileReader();
+    lector.onload = () => listo(String(lector.result).split(",")[1] || "");
+    lector.onerror = () => error(new Error("No pude abrir ese archivo."));
+    lector.readAsDataURL(archivo);
+  });
+  const mime = archivo.type || ({txt: "text/plain", md: "text/markdown", csv: "text/csv", json: "application/json"}
+    [(archivo.name.split(".").pop() || "").toLowerCase()] || "application/octet-stream");
+  return {tipo: "archivo", mime: mime, datos: datos, nombre: archivo.name || "archivo", tam: archivo.size};
+}
+
+function leerTexto(archivo) {
+  // Lo que dice un archivo de texto (para el cerebro del celular, sin internet): null si no es de texto
+  if (!/^(text\/|application\/(json|xml|csv))/.test(archivo.mime || "")) return null;
+  try {
+    const bytes = Uint8Array.from(atob(archivo.datos), (c) => c.charCodeAt(0));
+    return new TextDecoder("utf-8").decode(bytes).slice(0, 6000);
+  } catch (e) {
+    return null;
+  }
+}
+
+function mostrarAdjunto(adjunto) {
+  adjuntoListo = adjunto;
+  const esFoto = adjunto.tipo === "foto";
+  $("foto-miniatura").hidden = !esFoto;
+  if (esFoto) $("foto-miniatura").src = adjunto.miniatura;
+  $("adjunto-texto").textContent = esFoto ? "Foto lista para mandar" : `📄 ${adjunto.nombre} (${tamanoLindo(adjunto.tam)})`;
+  $("foto-lista").hidden = false;
+  ajustarCaja();
+  $("caja").placeholder = esFoto ? "¿Qué querés saber de la foto? (o mandala así)" : "¿Qué hago con el archivo? (o mandalo así)";
 }
 
 async function dictar() {
@@ -1198,6 +1656,7 @@ async function dictar() {
   $("caja").placeholder = "Escribile a JARVIS...";
   $("caja").value = "";
   ajustarCaja();
+  if (sinOidoSinInternet(r)) return avisoOidoSinInternet();
   if (r.error === "not-allowed") return avisar(`Dale permiso al micrófono para hablarme (${DONDE_PERMISOS}).`, 6);
   if (r.audio) return mandar("", {audio: r.audio, porVoz: true});
   if (r.texto) return mandar(r.texto, {porVoz: true});
@@ -1226,9 +1685,10 @@ async function prepararFoto(archivo) {
 }
 
 function sacarFoto() {
-  fotoLista = null;
+  adjuntoListo = null;
   $("foto-lista").hidden = true;
-  $("foto").value = "";
+  $("archivo").value = "";
+  $("caja").placeholder = "Escribile a JARVIS...";
 }
 
 
@@ -1253,12 +1713,13 @@ async function procesarDicho(texto) {
     await Oido.soltar();   // que no quede escuchando mientras JARVIS habla (se oiría a sí mismo)
     estadoInicio("pensando", "«" + texto + "»");
     $("inicio-acciones").innerHTML = "";
-    const r = await mandar(texto, {porVoz: true, sinVoz: true});
+    // (si contesta el cerebro del celular, se ve y se dice mientras lo va escribiendo)
+    const r = await mandar(texto, {porVoz: true, sinVoz: true, hablarYa: true, alEscribir: (t) => estadoInicio("hablando", t)});
     const respuesta = r.texto || (r.tarjetas.length ? "Confirmalo acá abajo." : "Listo.");
     pintarAcciones($("inicio-acciones"), r.acciones);
     r.tarjetas.forEach((t, i) => $("inicio-acciones").appendChild(pintarTarjeta(t, mensajes.length - 1, i)));
     estadoInicio("hablando", respuesta);
-    await Voz.decir(respuesta);
+    if (!r.dicho) await Voz.decir(respuesta);
   } finally {
     ocupado = false;
     estadoInicio(escucha.activa ? "esperando" : "libre");
@@ -1270,6 +1731,7 @@ async function hablarEnInicio() {
   if (ocupado) {
     Voz.callar();
     Oido.cortar();
+    Cerebro.parar();
     return;
   }
   ocupado = true;
@@ -1279,6 +1741,10 @@ async function hablarEnInicio() {
   estadoInicio("escuchando", "Te escucho...");
   const r = await Oido.oir((parcial) => { $("inicio-texto").textContent = parcial; });
   ocupado = false;
+  if (sinOidoSinInternet(r)) {
+    estadoInicio("libre", avisoOidoSinInternet());
+    return;
+  }
   if (r.error === "not-allowed") {
     estadoInicio("libre", `Dale permiso al micrófono para hablarme (${DONDE_PERMISOS}).`);
     return;
@@ -1330,7 +1796,8 @@ function puedeEscuchar() {
 }
 
 async function cicloJarvis() {
-  if (escucha.corriendo || !puedeOir) return;
+  // (en la web: el reconocimiento de Chrome, con la app abierta. En la app de Android lo hace Escucha.java)
+  if (escucha.corriendo || !puedeOir || Nativo.hay) return;
   escucha.corriendo = true;
   let errores = 0;
   try {
@@ -1375,7 +1842,35 @@ async function cicloJarvis() {
   }
 }
 
+const UMBRALES = {alta: 0.08, normal: 0.15, baja: 0.3};   // «Hey Jarvis»: qué tan seguro tiene que estar para despertarse
+
+async function activarEscuchaFondo(si, callado) {
+  // En la app de Android, «Hey Jarvis» lo escucha el celular: también con la app cerrada, sin internet y sin mandar el
+  // audio a ningún lado (como «Ok Google»). Android muestra una notificación mientras escucha
+  if (si) {
+    if (!Nativo.ya("permisos").microfono && !(await Nativo.cuando("pedirPermiso", "microfono")).si) {
+      si = false;
+      if (!callado) avisar(`Para escucharte, dale permiso al micrófono (${DONDE_PERMISOS}).`, 6);
+    } else if (!Nativo.ya("permisos").notificaciones && !callado) {
+      await Nativo.cuando("pedirPermiso", "notificaciones");
+    }
+  }
+  const r = Nativo.ya("escuchaFondo", si, UMBRALES[ajustes.sensibilidad] || UMBRALES.normal, ajustes.pantallaApagada !== false);
+  ajustes.escucharJarvis = si && !!r.prendida;
+  guardar("ajustes", ajustes);
+  $("escuchar-jarvis").checked = ajustes.escucharJarvis;
+  if (callado || !si) return;
+  if (!r.prendida) avisar("No pude prender la escucha. Probá de nuevo con la app abierta.", 5);
+  else if (!r.sobreApps) {
+    avisar("Listo: decí «Hey Jarvis». Para que se abra sola aunque estés en otra app, dale el permiso «Mostrar sobre otras apps».",
+           14, {texto: "Dar permiso", hacer: () => window.JarvisNativo.permisoSobreApps()});
+  } else {
+    avisar("Listo: decí «Hey Jarvis» cuando quieras, aunque la app esté cerrada.", 5);
+  }
+}
+
 function activarEscucha(si) {
+  if (Nativo.hay) return activarEscuchaFondo(si);
   escucha.activa = si && puedeOir;
   ajustes.escucharJarvis = escucha.activa;
   guardar("ajustes", ajustes);
@@ -1537,6 +2032,11 @@ async function cicloLlamada() {
       avisar(`Dale permiso al micrófono a la app (${DONDE_PERMISOS}) y llamame de nuevo.`, 7);
       return colgar();
     }
+    if (sinOidoSinInternet(oido)) {
+      await Voz.decir("Sin internet todavía no te puedo escuchar. Mirá la pantalla.");
+      avisoOidoSinInternet();
+      return colgar();
+    }
     if (!oido.texto && !oido.audio) {   // silencio: después de 3, se pone en pausa (no queda escuchando de más)
       if (++llamada.silencios >= 3 && !llamada.pausada) llamada.pausada = true;
       continue;
@@ -1548,7 +2048,8 @@ async function cicloLlamada() {
       return colgar();
     }
     estadoLlamada("pensando", oido.texto ? "«" + oido.texto + "»" : "");
-    const r = await mandar(oido.texto, {llamada: true, audio: oido.audio});
+    const r = await mandar(oido.texto, {llamada: true, audio: oido.audio, hablarYa: true,
+                                        alEscribir: (t) => estadoLlamada("hablando", t)});
     if (!llamada.activa) return;
     let respuesta = r ? r.texto : "Uy, no me pude conectar. ¿Probamos de nuevo?";
     $("llamada-tarjetas").innerHTML = "";
@@ -1560,7 +2061,7 @@ async function cicloLlamada() {
       if (!respuesta) respuesta = "Confirmalo en la pantalla.";
     }
     estadoLlamada("hablando", respuesta);
-    await Voz.decir(respuesta);
+    if (!r.dicho) await Voz.decir(respuesta);
   }
 }
 
@@ -1569,6 +2070,7 @@ function colgar() {
   llamada.activa = false;
   Oido.cancelar();
   Voz.callar();
+  Cerebro.parar();
   clearInterval(llamada.reloj);
   if (llamada.pantalla) llamada.pantalla.release().catch(() => {});
   llamada.pantalla = null;
@@ -1845,7 +2347,14 @@ function abrirAjustes() {
   $("ajuste-velocidad").value = ajustes.velocidad;
   $("velocidad-valor").textContent = ajustes.velocidad.toFixed(2) + "x";
   $("ajuste-avisos").checked = ajustes.avisos !== false;
+  $("ajuste-sensibilidad").value = ajustes.sensibilidad || "normal";
+  $("ajuste-pantalla-apagada").checked = ajustes.pantallaApagada !== false;
   $("ajustes-nativos").hidden = !Nativo.hay;
+  if (Nativo.hay) {   // el cerebro sin internet: cómo va la bajada, mientras están abiertos los ajustes
+    pintarCerebro();
+    clearInterval(abrirAjustes.reloj);
+    abrirAjustes.reloj = setInterval(() => { if ($("ajustes").open) pintarCerebro(); else clearInterval(abrirAjustes.reloj); }, 1000);
+  }
   $("ajustes-android").hidden = Nativo.hay || !/Android/i.test(navigator.userAgent);
   $("ajustes-info").textContent = (Nativo.hay ? `App de Android ${Nativo.info.version || VERSION_APP}. ` : `Versión ${VERSION_APP}. `)
     + (puedeOir ? "Te escucha con el reconocimiento de voz del celular."
@@ -1863,7 +2372,13 @@ function guardarAjustes() {
     ajustes.avisos = avisos;
     programarAvisos();
   }
+  // «Hey Jarvis»: si cambió algo y está prendido, se vuelve a prender con lo nuevo
+  const sensibilidad = $("ajuste-sensibilidad").value, pantallaApagada = $("ajuste-pantalla-apagada").checked;
+  const cambio = sensibilidad !== (ajustes.sensibilidad || "normal") || pantallaApagada !== (ajustes.pantallaApagada !== false);
+  ajustes.sensibilidad = sensibilidad;
+  ajustes.pantallaApagada = pantallaApagada;
   guardar("ajustes", ajustes);
+  if (cambio && Nativo.hay && ajustes.escucharJarvis) activarEscuchaFondo(true, true);
 }
 
 // ---------- La app de Android: actualizaciones, el botón atrás y lo que llega de afuera ----------
@@ -1886,13 +2401,83 @@ async function buscarActualizacion(aMano) {
   }
 }
 
+// ---------- El cerebro sin internet: bajarlo (una vez) y cómo va ----------
+
+function ofrecerCerebro(intento = 0) {
+  // La primera vez (y una vez por día, hasta que lo bajes): para que JARVIS te conteste sin internet
+  if (!Nativo.hay || !Cerebro.estado()) return;
+  const m = Cerebro.info();
+  if (!m || m.listo || m.bajada || leerGuardado("ofrecido", "") === new Date().toDateString()) return;
+  setTimeout(() => {
+    if (!$("aviso").hidden) {   // (hay otro aviso, por ejemplo una actualización: más tarde)
+      if (intento < 2) ofrecerCerebro(intento + 1);
+      return;
+    }
+    guardar("ofrecido", new Date().toDateString());
+    avisar(`Para que JARVIS te conteste sin internet, bajá su cerebro (${m.nombre}, ${(m.bytes / 1e9).toFixed(1)} GB, con wifi).`,
+           25, {texto: "Bajar", hacer: bajarCerebro});
+  }, intento ? 25000 : 4000);
+}
+
+function bajarCerebro() {
+  const r = Cerebro.bajar();
+  if (r.ok) avisar(r.ya ? "El cerebro ya está bajado." : "Bajando el cerebro (se ve en las notificaciones). Lo uso apenas termine.", 6);
+  else if (r.error === "sin_lugar") avisar(`No hay lugar: hacen falta ${(r.falta / 1e9).toFixed(1)} GB libres en el celular.`, 8);
+  else avisar("No pude empezar a bajarlo. Probá de nuevo.", 5);
+  pintarCerebro();
+}
+
+function pintarCerebro() {
+  // La parte de Ajustes: si está bajado, cuánto falta, cuál
+  const e = Cerebro.estado();
+  $("cerebro-caja").hidden = !e;
+  if (!e) return;
+  const m = Cerebro.info();
+  $("ajuste-modelo").value = Cerebro.modelo();
+  $("ajuste-solo-wifi").checked = ajustes.soloWifi !== false;
+  const gb = (m.bytes / 1e9).toFixed(1);
+  const bajando = m.bajada && m.bajada.estado !== "fallo";
+  const pct = m.bajada ? Math.floor(100 * m.bajada.hecho / m.bytes) : 0;
+  let texto;
+  if (m.listo) {
+    texto = `Listo: sin internet te contesta ${m.nombre}, desde el celular`
+      + (e.cargado === m.id ? ` (cargado, con ${e.placa === "gpu" ? "la placa de video" : "el procesador"})` : "") + ".";
+  } else if (m.bajada) {
+    texto = {bajando: `Bajando ${m.nombre}: ${pct}% de ${gb} GB.`,
+             pausada: m.bajada.motivo === "espera_wifi" ? `Esperando wifi para seguir bajando (${pct}%).`
+               : `En pausa (${pct}%): sigue sola cuando haya internet.`,
+             fallo: m.bajada.motivo === "sin_lugar" ? "No hubo lugar en el celular para bajarlo." : "No se pudo bajar. Probá de nuevo."}[m.bajada.estado];
+  } else {
+    texto = `Sin bajar. Pesa ${gb} GB (bajalo con wifi). Con él, JARVIS te contesta sin internet, como en la PC.`;
+  }
+  if (Nativo.info.ram && Nativo.info.ram < 5 && m.id === "gemma4") {
+    texto += ` Tu celular tiene ${Nativo.info.ram} GB de memoria: si anda lento, probá el liviano.`;
+  }
+  $("cerebro-texto").textContent = texto;
+  $("cerebro-progreso").hidden = !bajando;
+  $("cerebro-progreso").firstElementChild.style.width = pct + "%";
+  $("cerebro-bajar").hidden = m.listo || bajando;
+  $("cerebro-cancelar").hidden = !bajando;
+  $("cerebro-borrar").hidden = !m.listo;
+}
+
+function avisoOidoSinInternet() {
+  // Android no siempre trae el español para escuchar sin conexión: se baja una vez
+  const texto = "Sin internet, para escucharte el celular necesita el español sin conexión (Ajustes del celular › "
+    + "Google › Voz › Reconocimiento sin conexión). Mientras, escribime en la Charla.";
+  avisar(texto, 12, {texto: "Abrir", hacer: () => window.JarvisNativo.ajustes("voz")});
+  return texto;
+}
+
+const sinOidoSinInternet = (r) => Nativo.hay && !hayInternet() && ["network", "language-not-supported"].includes(r.error);
+
 window.JarvisApp = {
   atras() {
     // El botón atrás de Android: true si la app lo usó (si no, la app queda abierta por detrás)
     if ($("ajustes").open) { $("ajustes").close(); return true; }
     if (llamada.activa) { colgar(); return true; }
     if (vistaActual !== "inicio") { cambiarVista("inicio"); return true; }
-    if (ocupado) { Voz.callar(); Oido.cancelar(); return true; }
+    if (ocupado) { Voz.callar(); Oido.cancelar(); Cerebro.parar(); return true; }
     return false;
   },
 };
@@ -1918,8 +2503,13 @@ function escucharEventosNativos() {
     if (!ocupado) hablarEnInicio();
   });
   Nativo.al("llamar", () => llamar());
-  Nativo.al("conectar", (d) => { if (!conectarCon(d.u, d.k)) avisar("Ese link para conectar no anda. Pedí otro con /app.", 5); });
-  Nativo.al("compartido", async (d) => {   // un texto, un link o una foto compartidos desde otra app
+  Nativo.al("conectar", (d) => {
+    // (un link jarvis:// lo puede armar cualquiera: sin preguntar, alguien podría conectar tu app a SU bot y leer lo
+    // que le decís)
+    if (!confirm("¿Conecto la app con el JARVIS de este link? Hacelo solo si el link te lo mandó tu bot con /app.")) return;
+    if (!conectarCon(d.u, d.k)) avisar("Ese link para conectar no anda. Pedí otro con /app.", 5);
+  });
+  Nativo.al("compartido", async (d) => {   // un texto, un link, una foto o un archivo compartidos desde otra app
     cambiarVista("charla");
     if (d.texto) {
       $("caja").value = d.texto;
@@ -1927,14 +2517,13 @@ function escucharEventosNativos() {
     }
     if (d.imagen) {
       try {
-        fotoLista = await prepararFoto(await (await fetch(d.imagen)).blob());
-        $("foto-miniatura").src = fotoLista.miniatura;
-        $("foto-lista").hidden = false;
-        ajustarCaja();
+        mostrarAdjunto(Object.assign({tipo: "foto"}, await prepararFoto(await (await fetch(d.imagen)).blob())));
       } catch (e) {
         avisar("No pude abrir esa foto.");
       }
     }
+    if (d.archivo) mostrarAdjunto(Object.assign({tipo: "archivo"}, d.archivo));
+    if (d.error) avisar(d.error, 5);
     $("caja").focus();
   });
   Nativo.al("aviso", (d) => {   // tocaste la notificación de un recordatorio
@@ -1949,9 +2538,21 @@ function escucharEventosNativos() {
       if (escucha.activa) cicloJarvis();
     } else {
       marcarConexion("mal");
+      Cerebro.preparar();   // se fue internet: el cerebro del celular se carga ya (tarda unos segundos)
     }
   });
 }
+
+let soltarCerebro = null;   // (la app quedó por detrás: el cerebro libera la memoria si no volvés en 5 minutos)
+Nativo.al("pausa", () => {
+  clearTimeout(soltarCerebro);
+  soltarCerebro = setTimeout(() => { if (Nativo.hay && window.JarvisNativo.cerebroSoltar) window.JarvisNativo.cerebroSoltar(); },
+                             5 * 60000);
+});
+Nativo.al("vuelta", () => {
+  clearTimeout(soltarCerebro);
+  if (!hayInternet()) Cerebro.preparar();
+});
 
 let instalador = null;
 window.addEventListener("beforeinstallprompt", (e) => {
@@ -1986,18 +2587,15 @@ function conectarBotones() {
       enviarLoEscrito();
     }
   });
-  $("boton-foto").onclick = () => $("foto").click();
-  $("foto").onchange = async () => {
-    const archivo = $("foto").files[0];
+  $("boton-adjuntar").onclick = () => $("archivo").click();
+  $("archivo").onchange = async () => {   // una foto, un PDF, un audio, un video o un texto
+    const archivo = $("archivo").files[0];
     if (!archivo) return;
     try {
-      fotoLista = await prepararFoto(archivo);
-      $("foto-miniatura").src = fotoLista.miniatura;
-      $("foto-lista").hidden = false;
-      ajustarCaja();
-      $("caja").placeholder = "¿Qué querés saber de la foto? (o mandala así)";
+      mostrarAdjunto(await prepararAdjunto(archivo));
     } catch (e) {
-      avisar("No pude abrir esa foto.");
+      $("archivo").value = "";
+      avisar(e.message && !/onload|Event/.test(e.message) ? e.message : "No pude abrir ese archivo.", 5);
     }
   };
   $("foto-sacar").onclick = () => { sacarFoto(); ajustarCaja(); };
@@ -2008,7 +2606,7 @@ function conectarBotones() {
   $("boton-pausa").onclick = pausar;
   $("llamada-reactor").onclick = tocarReactor;
   $("boton-hablar").onclick = hablarEnInicio;
-  $("inicio-reactor").onclick = () => { if (ocupado) { Voz.callar(); Oido.cortar(); } };
+  $("inicio-reactor").onclick = () => { if (ocupado) { Voz.callar(); Oido.cortar(); Cerebro.parar(); } };
   $("escuchar-jarvis").onchange = () => activarEscucha($("escuchar-jarvis").checked);
   $("actualizar-mails").onclick = cargarMails;
 
@@ -2073,6 +2671,27 @@ function conectarBotones() {
   };
   $("ajuste-permisos").onclick = () => window.JarvisNativo.ajustes("app");
   $("ajuste-actualizar").onclick = () => buscarActualizacion(true);
+  // el cerebro sin internet
+  $("ajuste-modelo").onchange = () => {
+    ajustes.modelo = $("ajuste-modelo").value;
+    guardar("ajustes", ajustes);
+    pintarCerebro();
+  };
+  $("ajuste-solo-wifi").onchange = () => {
+    ajustes.soloWifi = $("ajuste-solo-wifi").checked;
+    guardar("ajustes", ajustes);
+  };
+  $("cerebro-bajar").onclick = bajarCerebro;
+  $("cerebro-cancelar").onclick = () => {
+    window.JarvisNativo.cerebroCancelar(Cerebro.modelo());
+    pintarCerebro();
+  };
+  $("cerebro-borrar").onclick = () => {
+    const m = Cerebro.info();
+    if (!confirm(`¿Borro el cerebro del celular (${m.nombre})? Libera ${(m.bytes / 1e9).toFixed(1)} GB, pero sin internet JARVIS no te va a poder contestar.`)) return;
+    window.JarvisNativo.cerebroBorrar(m.id);
+    setTimeout(pintarCerebro, 600);
+  };
   // la web app en Android: bajar la app, y pasarle la conexión
   $("bajar-android").href = ANDROID_WEB + "JARVIS.apk";
   $("conectar-android").onclick = () => {
@@ -2152,16 +2771,26 @@ function arrancar() {
   pintarCharla();
   pintarDia();
   pintarPc();
-  if (!hayInternet()) marcarConexion("mal");
+  if (!hayInternet()) {
+    marcarConexion("mal");
+    Cerebro.preparar();   // sin internet desde el arranque: el cerebro del celular, listo para cuando le hables
+  }
   primerosDatos();
   buscarActualizacion();
+  ofrecerCerebro();
   window.addEventListener("online", () => { marcarConexion("bien"); mandarCola(); });
   window.addEventListener("offline", () => marcarConexion("mal"));
   // cada minuto, mientras la app está a la vista: lo nuevo de la charla (lo que contó la PC, lo de Telegram)
   setInterval(() => {
-    if (document.visibilityState === "visible" && !llamada.activa && hayInternet()) sincronizarCharla();
+    if (document.visibilityState === "visible" && !llamada.activa && hayInternet()) {
+      sincronizarCharla();
+      mandarCola();   // (lo que se anotó mientras Google no contestaba)
+    }
   }, 60000);
-  if (ajustes.escucharJarvis && puedeOir) {
+  if (Nativo.hay) {   // «Hey Jarvis» con la app cerrada (si estaba prendido: después de reiniciar el celular, vuelve acá)
+    $("escuchar-jarvis").nextElementSibling.textContent = "Escuchar «Hey Jarvis» (también con la app cerrada)";
+    if (ajustes.escucharJarvis) activarEscuchaFondo(true, true);
+  } else if (ajustes.escucharJarvis && puedeOir) {
     escucha.activa = true;
     $("escuchar-jarvis").checked = true;
     cicloJarvis();
