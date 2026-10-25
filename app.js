@@ -15,7 +15,7 @@
 // ============================================================
 "use strict";
 
-const VERSION_APP = "2026.10.25.3";
+const VERSION_APP = "2026.10.25.4";
 const ANDROID_WEB = "https://rusty576.github.io/jarvis-celular/android/";   // el APK y su version.json
 const $ = (id) => document.getElementById(id);
 const Reco = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -65,7 +65,7 @@ const Nativo = {
   },
 };
 window.Nativo = Nativo;
-const puedeOir = Nativo.hay || !!Reco;
+let puedeOir = Nativo.hay || !!Reco;   // (en Android, sin reconocimiento de voz en el celular: graba y lo pasa el bot)
 const DONDE_PERMISOS = Nativo.hay ? "en Ajustes del celular › Apps › JARVIS › Permisos" : "en los ajustes de Chrome";
 
 // Lo que se guarda en este celular
@@ -528,9 +528,15 @@ const Grabadora = {
 
   async grabar(maximo = 30) {
     let stream;
+    const microfono = (si) => { if (Nativo.hay && window.JarvisNativo.microfono) window.JarvisNativo.microfono(si); };
+    if (Nativo.hay) {   // en la app de Android: primero el permiso de Android, y «Hey Jarvis» suelta el micrófono
+      if (!Nativo.ya("permisos").microfono && !(await Nativo.cuando("pedirPermiso", "microfono")).si) return "no-permitido";
+      microfono(true);
+    }
     try {
       stream = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: true, noiseSuppression: true}});
     } catch (e) {
+      microfono(false);
       return "no-permitido";
     }
     const contexto = new (window.AudioContext || window.webkitAudioContext)();
@@ -545,6 +551,7 @@ const Grabadora = {
         fuente.disconnect();
         stream.getTracks().forEach((p) => p.stop());
         contexto.close();
+        microfono(false);
         this.actual = null;
         listo(entregar && hablo ? aWav(pedazos, contexto.sampleRate) : null);
       };
@@ -657,12 +664,34 @@ function accionAUrl(a) {
     return {texto: a.texto || "Abrir", url: /^https:\/\//.test(a.url || "") ? a.url : "about:blank"};
   }
   if (a.tipo === "musica") {
-    const donde = {youtube: APPS.youtube, ytmusic: APPS["youtube music"], spotify: APPS.spotify}[ajustes.musica] || APPS.youtube;
+    const donde = APPS[musicaDonde(a).app];
     return {texto: `Poner «${a.busqueda}» en ${donde.nombre}`, url: donde.buscar(q)};
+  }
+  if (a.tipo === "navegar") {   // (en la web, o si no está Maps: la ruta en la página de Maps)
+    return {texto: `Cómo llegar a ${a.destino}`, url: "https://www.google.com/maps/dir/?api=1&destination="
+            + encodeURIComponent(a.destino || "")};
   }
   const app = appDe(a.app);
   if (!app) return {texto: `Buscar «${a.app}» en Play Store`, url: APPS["play store"].buscar(encodeURIComponent(a.app))};
   return {texto: `Abrir ${app.nombre}`, url: a.busqueda && app.buscar ? app.buscar(q) : app.url};
+}
+
+// La música: en qué app se pone (la que nombraste, «en Spotify», o la de Ajustes)
+const MUSICA = {youtube: {app: "youtube", paquete: "com.google.android.youtube"},
+                ytmusic: {app: "youtube music", paquete: "com.google.android.apps.youtube.music"},
+                spotify: {app: "spotify", paquete: "com.spotify.music"}};
+
+function musicaDonde(a) {
+  const pedida = a.app ? appDe(a.app) : null;
+  const clave = pedida && Object.keys(MUSICA).find((k) => MUSICA[k].app === pedida.clave);
+  return MUSICA[clave || ajustes.musica] || MUSICA.youtube;
+}
+
+let musicaPausadaPorMi = 0;   // cuándo JARVIS pausó la música del celular («seguí con la música» la vuelve a poner)
+
+function musicaEnElCelular() {
+  // si está sonando algo en el celular (si no, «pausá la música» puede ser la de la PC: eso lo ve el bot)
+  return Nativo.hay && !!window.JarvisNativo.musicaSonando && Nativo.ya("musicaSonando") === true;
 }
 
 function abrirUrl(url) {
@@ -783,7 +812,7 @@ function horaDe(hora) {
 const AJUSTES_CELULAR = {wifi: "wifi", "wi fi": "wifi", bluetooth: "bluetooth", ubicacion: "ubicacion", gps: "ubicacion",
   sonido: "sonido", pantalla: "pantalla", brillo: "pantalla", bateria: "bateria", "modo avion": "avion", avion: "avion",
   datos: "datos", "datos moviles": "datos", "no molestar": "no_molestar", notificaciones: "notificaciones",
-  almacenamiento: "almacenamiento", asistente: "asistente"};
+  almacenamiento: "almacenamiento", asistente: "asistente", nfc: "nfc"};
 
 async function hacerEnElTelefono(a) {
   // Lo que pidió el bot (o vos): en la app de Android se hace solo, sin tocar nada. Devuelve {ok, texto}
@@ -797,8 +826,30 @@ async function hacerEnElTelefono(a) {
       if (conocida) return ok(abrirUrl(conocida.url), `Abriendo ${conocida.nombre}.`);
       return {ok: false, texto: `No encontré «${a.app}» en el celular.`};
     }
-    case "musica":
+    case "musica": {
+      // la app de música lo busca y lo pone sola (Spotify y YouTube Music saben); si no sabe, se abre la búsqueda
+      if (a.busqueda && window.JarvisNativo.reproducir) {
+        const r = Nativo.ya("reproducir", a.busqueda, musicaDonde(a).paquete);
+        if (r.ok) return {ok: true, texto: `Poniendo «${a.busqueda}».`, callado: true};
+      }
       return ok(abrirUrl(accionAUrl(a).url), "");
+    }
+    case "medios": {   // pausar, seguir, pasar de canción (la que esté sonando en el celular)
+      const r = window.JarvisNativo.medios ? Nativo.ya("medios", a.que) : {ok: false};
+      if (!r.ok) return {ok: false, texto: "No pude manejar la música del celular."};
+      if (a.que !== "seguir" && !r.sonaba) return {ok: true, texto: "No hay música sonando en el celular."};
+      musicaPausadaPorMi = a.que === "pausa" ? Date.now() : 0;
+      const dicho = {pausa: "Pausé la música.", seguir: "Sigue la música.", siguiente: "Siguiente canción.",
+                     anterior: "Canción anterior."}[a.que];
+      return {ok: true, texto: dicho, callado: true};   // (la música misma avisa: JARVIS no habla encima)
+    }
+    case "navegar": {   // «llevame a...»: el GPS de Maps, ya andando; «cómo llego a...»: la ruta para elegir cómo ir
+      if (!a.ruta) {
+        const r = abrirUrl("google.navigation:q=" + encodeURIComponent(a.destino || ""));
+        if (r.ok !== false) return {ok: true, texto: `Vamos a ${a.destino}.`, callado: true};
+      }
+      return Object.assign(ok(abrirUrl(accionAUrl(a).url), `Te muestro cómo llegar a ${a.destino}.`), {callado: true});
+    }
     case "whatsapp": {
       const n = await numeroDe(a);
       if (n.problema && a.para) return {ok: false, texto: n.problema};
@@ -934,6 +985,11 @@ function textoDeAccion(a) {
   if (a.tipo === "volumen") return "Volumen";
   if (a.tipo === "ajustes") return "Abrir ajustes";
   if (a.tipo === "llamar") return "Llamar" + (a.para ? " a " + a.para : "");
+  if (a.tipo === "medios") {
+    return {pausa: "Pausar la música", seguir: "Seguir la música", siguiente: "Siguiente canción",
+            anterior: "Canción anterior"}[a.que] || "Música";
+  }
+  if (a.tipo === "navegar") return (a.ruta ? "Cómo llegar a " : "Ir a ") + a.destino;
   return accionAUrl(a).texto;
 }
 
@@ -981,7 +1037,7 @@ function horaDicha(t) {
 
 const LOCALES = [
   // los ajustes: «abrí el wifi», «ajustes de bluetooth» (una app no puede prender el wifi sola: abre su ajuste)
-  {re: /^(?:(?:abr[ie]\w*|anda a|mostra\w*|prend[ei]\w*|activa\w*|apaga\w*|desactiva\w*)\s+)?(?:(?:los |el |la )?(?:ajustes|configuracion|opciones) (?:de(?:l)? |de la )?|el |la |los )?(wi fi|wifi|bluetooth|ubicacion|gps|sonido|brillo|pantalla|bateria|modo avion|avion|datos moviles|datos|no molestar|notificaciones|almacenamiento)$/,
+  {re: /^(?:(?:abr[ie]\w*|anda a|mostra\w*|prend[ei]\w*|activa\w*|apaga\w*|desactiva\w*)\s+)?(?:(?:los |el |la )?(?:ajustes|configuracion|opciones) (?:de(?:l)? |de la )?|el |la |los )?(wi fi|wifi|bluetooth|ubicacion|gps|sonido|brillo|pantalla|bateria|modo avion|avion|datos moviles|datos|no molestar|notificaciones|almacenamiento|nfc)$/,
    nativo: true, accion: (m) => ({tipo: "ajustes", que: AJUSTES_CELULAR[m[1]]})},
   // «abrí WhatsApp», «abrime la cámara»
   {re: /^(?:abr[ie]\w*|entra(?:me)? a|anda a|inicia\w*|ejecuta\w*)\s+(?:el |la |los |las |mi |la app de |la aplicacion de |el app de )?(.+)$/,
@@ -1006,6 +1062,28 @@ const LOCALES = [
   {re: /^(?:pone(?:me)?\s+)?(?:el\s+)?volumen\s+(?:al|a|en)\s+(\d{1,3})\s*(?:%|por ciento)?$/, nativo: true,
    accion: (m) => ({tipo: "volumen", accion: m[1]})},
   {re: /^(?:pone(?:me)?\s+)?(?:el\s+)?volumen\s+(?:al\s+)?maximo$/, nativo: true, accion: () => ({tipo: "volumen", accion: "maximo"})},
+  // la música del celular: pausar, seguir y pasar de canción. Si no suena nada en el celular (y no dijiste «del
+  // celular»), puede ser la música de la PC: eso lo resuelve el bot
+  {re: /^(?:pausa\w*|pone(?:le)? pausa(?: a)?|para(?:la)?|frena\w*|deten\w*|corta\w*|apaga\w*)(?:\s+(?:la|el|esta|este))?\s+(?:musica|cancion|tema|video|reproduccion|spotify|youtube)((?:\s+(?:del|en el) (?:celu|celular|telefono)))?$|^pausa$/,
+   nativo: true, solo: (m) => !!m[1] || musicaEnElCelular(), accion: () => ({tipo: "medios", que: "pausa"})},
+  {re: /^(?:segui\w*|continua\w*|reanuda\w*|retoma\w*|despausa\w*|volve a poner|dale play a|pone(?:le)? play a)(?:\s+con)?(?:\s+(?:la|el))?\s+(?:musica|cancion|tema|video|reproduccion)((?:\s+(?:del|en el) (?:celu|celular|telefono)))?$|^(?:play|dale play|despausa\w*)$/,
+   nativo: true, solo: (m) => !!m[1] || Date.now() - musicaPausadaPorMi < 3 * 3600000 || musicaEnElCelular(),
+   accion: () => ({tipo: "medios", que: "seguir"})},
+  {re: /^(?:(?:pasa\w*|pone\w*|salta\w*|cambia\w*)\s+(?:a\s+)?)?(?:la\s+|el\s+)?(?:siguiente|proxima|proximo)(?:\s+(?:cancion|tema|video))?((?:\s+(?:del|en el) (?:celu|celular|telefono)))?$|^(?:pone\w*|pasa\w*)\s+otr[oa](?:\s+(?:cancion|tema))?$|^(?:saltea\w*|salta\w*|pasa\w*)\s+(?:esta|este|la|el)?\s*(?:cancion|tema)$/,
+   nativo: true, solo: (m) => !!m[1] || musicaEnElCelular(), accion: () => ({tipo: "medios", que: "siguiente"})},
+  {re: /^(?:(?:volve\w*|pone\w*|pasa\w*)\s+(?:a\s+)?)?(?:la\s+|el\s+)?(?:cancion\s+|tema\s+)?anterior((?:\s+(?:del|en el) (?:celu|celular|telefono)))?$/,
+   nativo: true, solo: (m) => !!m[1] || musicaEnElCelular(), accion: () => ({tipo: "medios", que: "anterior"})},
+  // poner música: «poné música de Queen», «reproducí Bohemian Rhapsody», «poné Queen en Spotify» (la de la PC, «en la
+  // compu», va al bot). Sin nada más («poné música»), sigue con la última que sonó
+  {re: /^(?!.*\b(?:compu|computadora|pc|notebook)\b)(?:pone(?:me)?|reproduci\w*|toca(?:me)?|quiero escuchar)\s+(?:en el (?:celu|celular|telefono)\s+)?(?:(?:un poco de|algo de|la|el|los|las|unas?)\s+)?(?:musica|canciones|cancion|tema|temas|album|disco|playlist)(?:\s+(?:de|del|que se llama|llamad[oa]))?\s*(.*?)(?:\s+en\s+(spotify|youtube music|youtube|yt music))?$/,
+   accion: (m) => m[1] ? {tipo: "musica", busqueda: m[1], app: m[2] || ""} : Nativo.hay && {tipo: "medios", que: "seguir"}},
+  {re: /^(?!.*\b(?:compu|computadora|pc|notebook)\b)(?:reproduci\w*\s+(.+?)(?:\s+en\s+(spotify|youtube music|youtube|yt music))?|pone(?:me)?\s+(.+?)\s+en\s+(spotify|youtube music|youtube|yt music))$/,
+   accion: (m) => ({tipo: "musica", busqueda: m[1] || m[3], app: m[2] || m[4] || ""})},
+  // «llevame a la plaza»: el GPS de Maps, ya andando; «cómo llego al shopping»: la ruta, para elegir cómo ir
+  {re: /^(?:llevame|lleva me|guiame|navega\w*|quiero ir)\s+(?:hasta |hacia |a la |al |a )(.+)$/,
+   accion: (m) => ({tipo: "navegar", destino: m[1]})},
+  {re: /^(?:como (?:llego|se llega|hago para (?:llegar|ir))|indicaciones para (?:ir|llegar))\s+(?:hasta |hacia |a la |al |a )(.+)$/,
+   accion: (m) => ({tipo: "navegar", destino: m[1], ruta: true})},
 ];
 
 function respuestaLocal(t) {
@@ -1014,9 +1092,12 @@ function respuestaLocal(t) {
   if (/^(?:que hora es|me (?:decis|das) la hora|hora|la hora)$/.test(t)) {
     return `Son las ${String(ahora.getHours()).padStart(2, "0")}:${String(ahora.getMinutes()).padStart(2, "0")}.`;
   }
-  if (/^(?:que (?:dia|fecha) es(?: hoy)?|que fecha tenemos|en que dia estamos|que dia es mañana)$/.test(t)) {
-    const meses = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
-    return `Hoy es ${DIAS[ahora.getDay()]} ${ahora.getDate()} de ${meses[ahora.getMonth()]}.`;
+  if (/^(?:que (?:dia|fecha) es(?: hoy)?|que fecha tenemos|en que dia estamos)$/.test(t)) {
+    return `Hoy es ${DIAS[ahora.getDay()]} ${ahora.getDate()} de ${MESES[ahora.getMonth()]}.`;
+  }
+  if (/^(?:que (?:dia|fecha) (?:es|cae|sera) manana|manana que dia es)$/.test(t)) {   // (llega sin la ñ)
+    const manana = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate() + 1);
+    return `Mañana es ${DIAS[manana.getDay()]} ${manana.getDate()} de ${MESES[manana.getMonth()]}.`;
   }
   if (Nativo.hay && /^(?:(?:cuanta|que|cuanto de|como (?:esta|anda) (?:la|mi))\s+)?bateria(?:\s+(?:tengo|me queda|hay|queda|tiene el celular))?$/.test(t)) {
     const b = Nativo.ya("bateria");
@@ -1043,7 +1124,7 @@ async function hacerLocal(texto) {
       return {texto: r.texto.replace(/^Abrir/, "Abriendo") + ".", acciones: [accion]};
     }
     const r = await hacerEnElTelefono(accion);
-    return {texto: r.texto || "Listo.", acciones: r.ok ? [accion] : []};
+    return {texto: r.texto || "Listo.", acciones: r.ok ? [accion] : [], callado: !!r.callado};
   }
   return null;
 }
@@ -1455,7 +1536,7 @@ async function mandar(texto, opciones = {}) {
   const local = !foto && !archivo && !opciones.audio && texto ? await hacerLocal(texto) : null;   // «abrí WhatsApp», «linterna»: al toque
   if (local) {
     agregar({quien: "jarvis", texto: local.texto, acciones: local.acciones});
-    return {texto: local.texto, tarjetas: [], acciones: local.acciones, local: true};
+    return {texto: local.texto, tarjetas: [], acciones: local.acciones, local: true, callado: local.callado};
   }
   const sinInternet = () => {
     // sin internet y sin el cerebro del celular: lo escrito queda en la cola y sale solo cuando vuelve
@@ -1521,11 +1602,13 @@ async function mandar(texto, opciones = {}) {
       agregar({quien: "aviso", texto: problema});
       respuesta = problema;   // (lo que se dice en voz alta: el problema, no «listo»)
     }
-    if (!opciones.llamada && !opciones.sinVoz && respuesta
+    // (si arrancó la música o el GPS en el celular, JARVIS no habla encima: queda escrito)
+    const callado = !problema && Nativo.hay && acciones.some((a) => ["musica", "medios", "navegar"].includes(a.tipo));
+    if (!opciones.llamada && !opciones.sinVoz && respuesta && !callado
         && (ajustes.leer === "siempre" || (ajustes.leer === "auto" && opciones.porVoz))) {
       Voz.decir(respuesta);
     }
-    return {texto: respuesta, tarjetas: r.tarjetas || [], acciones: acciones, pedido: r.pedido};
+    return {texto: respuesta, tarjetas: r.tarjetas || [], acciones: acciones, pedido: r.pedido, callado: callado};
   } catch (e) {
     pensando(false);
     if (soloTexto && ["sin_red", "servidor", "http", "no_json", "tiempo"].includes(e.tipo)) {
@@ -1719,7 +1802,7 @@ async function procesarDicho(texto) {
     pintarAcciones($("inicio-acciones"), r.acciones);
     r.tarjetas.forEach((t, i) => $("inicio-acciones").appendChild(pintarTarjeta(t, mensajes.length - 1, i)));
     estadoInicio("hablando", respuesta);
-    if (!r.dicho) await Voz.decir(respuesta);
+    if (!r.dicho && !r.callado) await Voz.decir(respuesta);
   } finally {
     ocupado = false;
     estadoInicio(escucha.activa ? "esperando" : "libre");
@@ -1864,6 +1947,9 @@ async function activarEscuchaFondo(si, callado) {
   else if (!r.sobreApps) {
     avisar("Listo: decí «Hey Jarvis». Para que se abra sola aunque estés en otra app, dale el permiso «Mostrar sobre otras apps».",
            14, {texto: "Dar permiso", hacer: () => window.JarvisNativo.permisoSobreApps()});
+  } else if (r.sinAhorro === false && window.JarvisNativo.pedirSinAhorro) {
+    avisar("Listo: decí «Hey Jarvis». Para que el ahorro de batería no lo apague, tocá «Permitir» y aceptá.",
+           14, {texto: "Permitir", hacer: () => window.JarvisNativo.pedirSinAhorro()});
   } else {
     avisar("Listo: decí «Hey Jarvis» cuando quieras, aunque la app esté cerrada.", 5);
   }
@@ -2061,7 +2147,7 @@ async function cicloLlamada() {
       if (!respuesta) respuesta = "Confirmalo en la pantalla.";
     }
     estadoLlamada("hablando", respuesta);
-    if (!r.dicho) await Voz.decir(respuesta);
+    if (!(r && (r.dicho || r.callado))) await Voz.decir(respuesta);
   }
 }
 
@@ -2351,6 +2437,8 @@ function abrirAjustes() {
   $("ajuste-pantalla-apagada").checked = ajustes.pantallaApagada !== false;
   $("ajustes-nativos").hidden = !Nativo.hay;
   if (Nativo.hay) {   // el cerebro sin internet: cómo va la bajada, mientras están abiertos los ajustes
+    const e = Nativo.ya("escuchaEstado");   // (el botón de la batería, solo si hace falta)
+    $("ajuste-bateria").hidden = e.sinAhorro !== false || !window.JarvisNativo.pedirSinAhorro;
     pintarCerebro();
     clearInterval(abrirAjustes.reloj);
     abrirAjustes.reloj = setInterval(() => { if ($("ajustes").open) pintarCerebro(); else clearInterval(abrirAjustes.reloj); }, 1000);
@@ -2541,6 +2629,11 @@ function escucharEventosNativos() {
       Cerebro.preparar();   // se fue internet: el cerebro del celular se carga ya (tarda unos segundos)
     }
   });
+  Nativo.al("escucha", (d) => {   // «Hey Jarvis» se prendió o se apagó desde afuera (la notificación, el widget)
+    ajustes.escucharJarvis = !!d.prendida;
+    guardar("ajustes", ajustes);
+    $("escuchar-jarvis").checked = ajustes.escucharJarvis;
+  });
 }
 
 let soltarCerebro = null;   // (la app quedó por detrás: el cerebro libera la memoria si no volvés en 5 minutos)
@@ -2669,6 +2762,10 @@ function conectarBotones() {
     window.JarvisNativo.ajustes("asistente");
     avisar("Elegí JARVIS en «App de asistente digital». Después, mantener apretado inicio (o encendido) abre JARVIS escuchando.", 9);
   };
+  $("ajuste-bateria").onclick = () => {
+    window.JarvisNativo.pedirSinAhorro();
+    avisar("Tocá «Permitir»: así el ahorro de batería no apaga «Hey Jarvis».", 6);
+  };
   $("ajuste-permisos").onclick = () => window.JarvisNativo.ajustes("app");
   $("ajuste-actualizar").onclick = () => buscarActualizacion(true);
   // el cerebro sin internet
@@ -2755,6 +2852,7 @@ function arrancar() {
     escucharEventosNativos();
     Nativo.info = Nativo.ya("listo") || {};   // (Android manda lo que estaba esperando: el asistente, algo compartido)
     document.documentElement.classList.add("nativa");
+    if (Nativo.info.oido === false && window.JarvisNativo.microfono) puedeOir = false;   // (un celular sin el de Google)
   }
   leerLink();
   reactorInicio = crearReactor($("reactor-inicio"));
@@ -2789,7 +2887,15 @@ function arrancar() {
   }, 60000);
   if (Nativo.hay) {   // «Hey Jarvis» con la app cerrada (si estaba prendido: después de reiniciar el celular, vuelve acá)
     $("escuchar-jarvis").nextElementSibling.textContent = "Escuchar «Hey Jarvis» (también con la app cerrada)";
-    if (ajustes.escucharJarvis) activarEscuchaFondo(true, true);
+    // lo que dice Android manda: si lo apagaste desde la notificación o el widget, queda apagado; si lo prendiste
+    // desde el widget, queda prendido (quiere: null en las apps de antes, que no lo anotaban)
+    const e = Nativo.ya("escuchaEstado");
+    if (typeof e.quiere === "boolean" || e.prendida) {
+      ajustes.escucharJarvis = !!(e.prendida || e.quiere);
+      guardar("ajustes", ajustes);
+      $("escuchar-jarvis").checked = ajustes.escucharJarvis;
+    }
+    if (ajustes.escucharJarvis && !e.prendida) activarEscuchaFondo(true, true);
   } else if (ajustes.escucharJarvis && puedeOir) {
     escucha.activa = true;
     $("escuchar-jarvis").checked = true;
