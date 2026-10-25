@@ -2,11 +2,14 @@
 :root {
   --fondo: #02070d;
   --panel: rgba(6, 24, 38, 0.72);
-  --panel-borde: rgba(41, 217, 255, 0.22);
+  --panel-borde: rgba(var(--cian-rgb), 0.22);
+  /* el color de JARVIS (Ajustes › Apariencia lo cambia: rojo, dorado, verde, violeta) */
+  --cian-rgb: 41, 217, 255;
   --cian: #29d9ff;
   --cian-fuerte: #7ae9ff;
-  --cian-tenue: rgba(41, 217, 255, 0.12);
-  --cian-sutil: rgba(41, 217, 255, 0.06);
+  --cian-oscuro: #1aa6cf;
+  --cian-tenue: rgba(var(--cian-rgb), 0.12);
+  --cian-sutil: rgba(var(--cian-rgb), 0.06);
   --texto: #d4f3ff;
   --texto-2: #8fb9cf;
   --texto-3: #5a8399;
@@ -51,8 +54,8 @@ body {
   flex-direction: column;
   height: 100dvh;
   background:
-    radial-gradient(ellipse at 50% -10%, rgba(41, 217, 255, 0.13), transparent 60%),
-    linear-gradient(rgba(41, 217, 255, 0.035) 1px, transparent 1px) 0 0 / 100% 28px,
+    radial-gradient(ellipse at 50% -10%, rgba(var(--cian-rgb), 0.13), transparent 60%),
+    linear-gradient(rgba(var(--cian-rgb), 0.035) 1px, transparent 1px) 0 0 / 100% 28px,
     var(--fondo);
 }
 
@@ -65,15 +68,14 @@ svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width:
   display: flex; align-items: center; gap: 12px;
   padding: calc(10px + var(--arriba)) 16px 10px;
   border-bottom: 1px solid var(--panel-borde);
-  background: rgba(2, 7, 13, 0.85);
-  backdrop-filter: blur(8px);
+  background: rgba(2, 7, 13, 0.94);   /* (sin desenfoque: en el celular costaba en cada cuadro) */
 }
-.logo { width: 38px; height: 38px; filter: drop-shadow(0 0 8px rgba(41, 217, 255, 0.6)); }
+.logo { width: 38px; height: 38px; filter: drop-shadow(0 0 8px rgba(var(--cian-rgb), 0.6)); }
 .logo.pensando { animation: girar 1.4s linear infinite; }
 @keyframes girar { to { transform: rotate(360deg); } }
 .titulo { display: flex; flex-direction: column; flex: 1; min-width: 0; }
 .titulo b { font-family: var(--titulo); font-weight: 900; font-size: 17px; letter-spacing: 0.3em; color: var(--cian-fuerte);
-            text-shadow: 0 0 12px rgba(41, 217, 255, 0.55); }
+            text-shadow: 0 0 12px rgba(var(--cian-rgb), 0.55); }
 .titulo small { display: flex; align-items: center; gap: 6px; font-size: 13px; letter-spacing: 0.08em; color: var(--texto-3); }
 .punto { width: 7px; height: 7px; border-radius: 50%; background: var(--texto-3); }
 .punto.bien { background: var(--verde); box-shadow: 0 0 8px var(--verde); }
@@ -92,7 +94,7 @@ svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width:
 .inicio-reactor canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
 .inicio-estado { position: absolute; left: 0; right: 0; bottom: 2px; text-align: center; font-family: var(--titulo);
                  font-weight: 700; font-size: 13px; letter-spacing: 0.45em; padding-left: 0.45em; color: var(--cian);
-                 text-shadow: 0 0 12px rgba(41, 217, 255, 0.7); }
+                 text-shadow: 0 0 12px rgba(var(--cian-rgb), 0.7); }
 .inicio-estado.escuchando { color: var(--verde); text-shadow: 0 0 12px rgba(77, 255, 184, 0.6); }
 .inicio-estado.pensando { color: var(--ambar); text-shadow: 0 0 12px rgba(255, 181, 71, 0.6); }
 .inicio-estado.esperando { color: var(--texto-2); letter-spacing: 0.3em; }
@@ -100,8 +102,8 @@ svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width:
                 font-size: 18px; font-weight: 500; line-height: 1.35; color: var(--texto); white-space: pre-wrap; }
 .inicio-hablar { margin: 8px 0 6px; }
 .hablar { display: flex; align-items: center; gap: 10px; padding: 14px 30px; border: none; border-radius: 34px;
-          background: radial-gradient(circle at 50% 30%, #7ae9ff, #1aa6cf 75%); color: #021018; font-family: var(--titulo);
-          font-weight: 700; font-size: 14px; letter-spacing: 0.25em; box-shadow: 0 0 24px rgba(41, 217, 255, 0.55); }
+          background: radial-gradient(circle at 50% 30%, var(--cian-fuerte), var(--cian-oscuro) 75%); color: #021018; font-family: var(--titulo);
+          font-weight: 700; font-size: 14px; letter-spacing: 0.25em; box-shadow: 0 0 24px rgba(var(--cian-rgb), 0.55); }
 .hablar svg { width: 26px; height: 26px; }
 .hablar.grabando { background: radial-gradient(circle at 50% 30%, #b4ffe1, #22c98a 75%); box-shadow: 0 0 26px var(--verde);
                    animation: latido 1s ease-in-out infinite; }
@@ -121,9 +123,9 @@ svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width:
              color: var(--texto-2); font-size: 13px; font-weight: 600; text-align: center; line-height: 1.1; }
 .protocolo .hex { width: 58px; height: 64px; display: grid; place-items: center; color: var(--cian);
                   clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
-                  background: linear-gradient(160deg, rgba(41, 217, 255, 0.28), rgba(6, 24, 38, 0.95) 55%); }
-.protocolo .hex svg { width: 26px; height: 26px; filter: drop-shadow(0 0 4px rgba(41, 217, 255, 0.7)); }
-.protocolo:active .hex { background: linear-gradient(160deg, rgba(41, 217, 255, 0.55), rgba(6, 24, 38, 0.95) 60%); }
+                  background: linear-gradient(160deg, rgba(var(--cian-rgb), 0.28), rgba(6, 24, 38, 0.95) 55%); }
+.protocolo .hex svg { width: 26px; height: 26px; filter: drop-shadow(0 0 4px rgba(var(--cian-rgb), 0.7)); }
+.protocolo:active .hex { background: linear-gradient(160deg, rgba(var(--cian-rgb), 0.55), rgba(6, 24, 38, 0.95) 60%); }
 
 /* lo que se hace en el celular (abrir una app, música, WhatsApp, llamar) */
 .acciones { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 8px; width: 100%; }
@@ -201,7 +203,7 @@ h2 { font-family: var(--titulo); font-size: 12px; font-weight: 700; letter-spaci
                border: 1px solid var(--panel-borde); background: var(--panel); color: var(--cian); }
 .icono-boton.chico { width: 32px; height: 32px; }
 .icono-boton.chico svg { width: 18px; height: 18px; }
-.icono-boton.principal { background: var(--cian); color: #021018; border: none; box-shadow: 0 0 16px rgba(41, 217, 255, 0.45); }
+.icono-boton.principal { background: var(--cian); color: #021018; border: none; box-shadow: 0 0 16px rgba(var(--cian-rgb), 0.45); }
 .icono-boton.principal .si-texto { display: none; }
 .barra.con-texto .icono-boton.principal .si-vacio { display: none; }
 .barra.con-texto .icono-boton.principal .si-texto { display: block; }
@@ -212,7 +214,7 @@ h2 { font-family: var(--titulo); font-size: 12px; font-weight: 700; letter-spaci
 .tarjeta { padding: 14px 16px; border-radius: 16px; background: var(--panel); border: 1px solid var(--panel-borde); }
 .clima-ahora { display: flex; align-items: center; gap: 14px; }
 .clima-grados { font-family: var(--titulo); font-size: 40px; font-weight: 700; color: var(--cian-fuerte);
-                text-shadow: 0 0 14px rgba(41, 217, 255, 0.5); }
+                text-shadow: 0 0 14px rgba(var(--cian-rgb), 0.5); }
 .clima-detalle { color: var(--texto-2); line-height: 1.25; }
 .clima-detalle b { color: var(--texto); font-weight: 600; }
 .clima-dias { display: flex; gap: 8px; margin-top: 12px; }
@@ -258,12 +260,12 @@ h2 { font-family: var(--titulo); font-size: 12px; font-weight: 700; letter-spaci
                       transition: background 0.2s; }
 .pestana .indicador svg { width: 22px; height: 22px; }
 .pestana.activa { color: var(--cian-fuerte); }
-.pestana.activa .indicador { background: rgba(41, 217, 255, 0.18); }
-.pestana.activa svg { filter: drop-shadow(0 0 6px rgba(41, 217, 255, 0.7)); }
+.pestana.activa .indicador { background: rgba(var(--cian-rgb), 0.18); }
+.pestana.activa svg { filter: drop-shadow(0 0 6px rgba(var(--cian-rgb), 0.7)); }
 /* Llamar se destaca con su pastilla llena, sin salirse de la barra */
 .pestana.llamar { color: var(--texto-2); }
-.pestana.llamar .indicador { background: radial-gradient(circle at 50% 30%, #7ae9ff, #1aa6cf 80%); color: #021018;
-                             box-shadow: 0 0 14px rgba(41, 217, 255, 0.5); }
+.pestana.llamar .indicador { background: radial-gradient(circle at 50% 30%, var(--cian-fuerte), var(--cian-oscuro) 80%); color: #021018;
+                             box-shadow: 0 0 14px rgba(var(--cian-rgb), 0.5); }
 .pestana.llamar svg { fill: currentColor; stroke: none; }
 
 /* ---------- La llamada ---------- */
@@ -272,12 +274,12 @@ h2 { font-family: var(--titulo); font-size: 12px; font-weight: 700; letter-spaci
            background: radial-gradient(circle at 50% 38%, #06263a, var(--fondo) 70%); }
 .llamada-cabeza { display: flex; flex-direction: column; align-items: center; gap: 2px; }
 .llamada-cabeza b { font-family: var(--titulo); font-weight: 900; letter-spacing: 0.35em; color: var(--cian-fuerte);
-                    text-shadow: 0 0 14px rgba(41, 217, 255, 0.6); }
+                    text-shadow: 0 0 14px rgba(var(--cian-rgb), 0.6); }
 .llamada-cabeza span { font-family: var(--titulo); font-size: 12px; color: var(--texto-3); letter-spacing: 0.15em; }
 .llamada-reactor { flex: 1; width: 100%; min-height: 220px; position: relative; }
 .llamada-reactor canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
 .llamada-estado { font-family: var(--titulo); font-weight: 700; font-size: 15px; letter-spacing: 0.45em; padding-left: 0.45em;
-                  color: var(--cian); text-shadow: 0 0 12px rgba(41, 217, 255, 0.7); text-align: center; }
+                  color: var(--cian); text-shadow: 0 0 12px rgba(var(--cian-rgb), 0.7); text-align: center; }
 .llamada-estado.pensando { color: var(--ambar); text-shadow: 0 0 12px rgba(255, 181, 71, 0.6); }
 .llamada-estado.escuchando { color: var(--verde); text-shadow: 0 0 12px rgba(77, 255, 184, 0.6); }
 .llamada-texto { min-height: 4.2em; max-height: 9em; overflow-y: auto; margin: 10px 0 6px; text-align: center; font-size: 18px;
@@ -298,7 +300,7 @@ h2 { font-family: var(--titulo); font-size: 12px; font-weight: 700; letter-spaci
 /* ---------- Conectar, ajustes y avisos ---------- */
 .conectar { position: fixed; inset: 0; z-index: 30; display: flex; flex-direction: column; align-items: center; justify-content: center;
             padding: 30px; text-align: center; background: var(--fondo); }
-.conectar-logo { width: 150px; filter: drop-shadow(0 0 24px rgba(41, 217, 255, 0.6)); }
+.conectar-logo { width: 150px; filter: drop-shadow(0 0 24px rgba(var(--cian-rgb), 0.6)); }
 .conectar h1 { font-family: var(--titulo); font-weight: 900; letter-spacing: 0.35em; color: var(--cian-fuerte); padding-left: 0.35em; }
 .conectar ol { text-align: left; line-height: 1.6; color: var(--texto-2); }
 .conectar b { color: var(--cian-fuerte); }
@@ -340,3 +342,117 @@ a.boton { text-decoration: none; display: inline-block; }
 .cartel span { flex: 1; }
 .cartel button { flex: none; border: none; background: none; padding: 6px 4px; color: var(--cian-fuerte); font-family: var(--titulo);
                  font-size: 12px; font-weight: 700; letter-spacing: 0.12em; }
+.cartel { border-radius: 14px; border: 1px solid rgba(var(--cian-rgb), 0.3); background: rgba(9, 32, 48, 0.97); }
+
+/* ---------- Más lindo y más liviano (2026-10-25) ---------- */
+
+/* las vistas aparecen suave al cambiar de pestaña */
+.vista.activa { animation: aparecer 0.18s ease-out; }
+@keyframes aparecer { from { opacity: 0; transform: translateY(6px); } }
+
+/* la charla: los mensajes que no se ven no se dibujan (con muchos, abre y se mueve más rápido) */
+.mensajes > .msg:not(:nth-last-child(-n+12)) { content-visibility: auto; contain-intrinsic-size: auto 90px; }
+.msg .quien { display: flex; align-items: baseline; gap: 8px; }
+.msg .quien time { margin-left: auto; font-family: var(--cuerpo); font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
+                   color: var(--texto-3); }
+.msg.vos .quien { flex-direction: row-reverse; }
+.msg.vos .quien time { margin-left: 0; margin-right: auto; }
+.msg.de-aviso { border-color: rgba(var(--cian-rgb), 0.5); background: linear-gradient(160deg, rgba(var(--cian-rgb), 0.13), var(--panel) 65%); }
+.msg.de-aviso .quien { color: var(--cian-fuerte); }
+.msg .de-cola { display: block; margin-bottom: 4px; font-size: 13px; color: var(--ambar); }
+.msg img.foto { cursor: zoom-in; }
+.chip.anteriores { align-self: center; padding: 7px 14px; font-size: 14px; }
+
+/* las imágenes de JARVIS: una sola, grande; varias (las fotos que encontró), en cuadrícula */
+.galeria { display: grid; gap: 6px; margin-top: 8px; }
+.galeria.n2, .galeria.n3, .galeria.n4 { grid-template-columns: 1fr 1fr; }
+.foto-cuadro { position: relative; display: grid; place-items: center; min-height: 80px; padding: 0; overflow: hidden;
+               border: 1px solid var(--panel-borde); border-radius: 12px; background: rgba(var(--cian-rgb), 0.06);
+               color: var(--texto-3); font-size: 14px; }
+.foto-cuadro img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.galeria.n1 .foto-cuadro img { object-fit: contain; max-height: 340px; }
+.galeria.n1 .foto-cuadro.vertical img { max-height: 420px; }
+.galeria:not(.n1) .foto-cuadro { aspect-ratio: 1; }
+.foto-cuadro.sin-foto { aspect-ratio: 4 / 3; animation: respirar 1.6s ease-in-out infinite; }
+@keyframes respirar { 50% { opacity: 0.55; } }
+.foto-botones { display: flex; flex-wrap: wrap; gap: 6px; grid-column: 1 / -1; }
+.accion.chica { padding: 7px 12px; border-radius: 16px; font-size: 14px; }
+#inicio-acciones .galeria { width: min(100%, 360px); }
+
+/* el visor: la imagen entera, a pantalla completa */
+.visor { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; gap: 6px;
+         padding: calc(8px + var(--arriba)) 12px calc(14px + var(--abajo)); background: rgba(1, 4, 8, 0.97);
+         animation: aparecer 0.15s ease-out; }
+.visor-barra { display: flex; align-items: center; gap: 12px; color: var(--texto-2); font-family: var(--titulo); font-size: 12px;
+               letter-spacing: 0.15em; }
+.visor-foto { position: relative; flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: auto; }
+.visor-foto img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 6px; }
+.visor-foto img.zoom { max-width: none; max-height: none; width: 220%; }
+.visor-flecha { position: absolute; top: 50%; z-index: 1; width: 44px; height: 44px; display: grid; place-items: center;
+                transform: translateY(-50%); border-radius: 50%; border: 1px solid var(--panel-borde); background: rgba(2, 7, 13, 0.75);
+                color: var(--cian); }
+.visor-flecha.izq { left: 2px; }
+.visor-flecha.der { right: 2px; }
+.visor-texto { min-height: 1.2em; margin: 4px 0; text-align: center; color: var(--texto-2); font-size: 15px; }
+.visor-botones { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+
+/* Inicio como un HUD: la hora, el clima, la batería y lo próximo, en las esquinas del reactor */
+.hud-esquina { position: absolute; z-index: 1; display: flex; flex-direction: column; gap: 1px; color: var(--texto-2);
+               font-size: 13px; line-height: 1.2; pointer-events: none; }
+.hud-esquina b { font-family: var(--titulo); font-size: 22px; font-weight: 700; letter-spacing: 0.06em; color: var(--cian-fuerte);
+                 text-shadow: 0 0 10px rgba(var(--cian-rgb), 0.45); }
+.hud-esquina.izq { top: 6px; left: 0; }
+.hud-esquina.der { top: 6px; right: 0; align-items: flex-end; pointer-events: auto; cursor: pointer; }
+.hud-esquina.abajo-izq { bottom: 26px; left: 0; }
+.hud-esquina.abajo-der { bottom: 26px; right: 0; max-width: 48%; padding: 0; border: none; background: none; font: inherit;
+                         font-size: 13px; color: var(--ambar); text-align: right; white-space: nowrap; overflow: hidden;
+                         text-overflow: ellipsis; pointer-events: auto; }
+.hud-esquina.abajo-der:empty, .hud-esquina.abajo-izq:empty { display: none; }
+
+/* los ajustes, por grupos que se abren y se cierran */
+.grupo { margin: 0 0 10px; border: 1px solid var(--panel-borde); border-radius: 14px; background: rgba(var(--cian-rgb), 0.03); }
+.grupo > summary { display: flex; align-items: center; justify-content: space-between; padding: 13px 16px; list-style: none;
+                   cursor: pointer; font-family: var(--titulo); font-size: 12px; font-weight: 700; letter-spacing: 0.22em;
+                   text-transform: uppercase; color: var(--cian); }
+.grupo > summary::-webkit-details-marker { display: none; }
+.grupo > summary::after { content: ""; width: 8px; height: 8px; border-right: 2px solid var(--cian); border-bottom: 2px solid var(--cian);
+                          transform: rotate(45deg); transition: transform 0.2s; }
+.grupo[open] > summary::after { transform: rotate(225deg); }
+.grupo > :not(summary) { margin-left: 16px; margin-right: 16px; }
+.grupo[open] { padding-bottom: 6px; }
+.grupo .cerebro-caja { margin: 0 16px 10px; padding: 2px 0 0; border: none; background: none; }
+.opcion input:not([type]) { padding: 10px 12px; border-radius: 10px; background: var(--panel); border: 1px solid var(--panel-borde);
+                            outline: none; font-weight: 500; }
+.opcion input:not([type]):focus { border-color: var(--cian); }
+.del-bot:disabled, .interruptor input.del-bot:disabled { opacity: 0.45; }
+.colores { display: flex; gap: 12px; margin-top: 4px; }
+.colores button { width: 38px; height: 38px; padding: 0; border-radius: 50%; border: 2px solid transparent; }
+.colores button.elegido { border-color: var(--texto); box-shadow: 0 0 0 3px rgba(var(--cian-rgb), 0.35); }
+.colores [data-color=celeste] { background: radial-gradient(circle at 35% 30%, #7ae9ff, #1aa6cf); }
+.colores [data-color=rojo] { background: radial-gradient(circle at 35% 30%, #ff8f99, #c9283b); }
+.colores [data-color=dorado] { background: radial-gradient(circle at 35% 30%, #ffdb8f, #c98d18); }
+.colores [data-color=verde] { background: radial-gradient(circle at 35% 30%, #94ffcf, #17b874); }
+.colores [data-color=violeta] { background: radial-gradient(circle at 35% 30%, #cbb0ff, #7448d6); }
+.hoja-fila.otros { margin-top: 6px; }
+
+/* el puntito de la pestaña Charla: hay algo nuevo (un aviso, algo de Telegram o de la PC) */
+.pestana.con-novedad .indicador::after { content: ""; position: absolute; top: 4px; right: 14px; width: 9px; height: 9px;
+                                         border-radius: 50%; background: var(--ambar); box-shadow: 0 0 8px var(--ambar); }
+
+/* el tamaño de la letra (Ajustes › Apariencia) */
+html[data-letra=chica] .msg { font-size: 15.5px; }
+html[data-letra=chica] .inicio-texto { font-size: 16px; }
+html[data-letra=chica] .item, html[data-letra=chica] .chip { font-size: 14.5px; }
+html[data-letra=grande] .msg { font-size: 19.5px; }
+html[data-letra=grande] .inicio-texto { font-size: 21px; }
+html[data-letra=grande] .item, html[data-letra=grande] .chip, html[data-letra=grande] .clima-detalle { font-size: 18.5px; }
+html[data-letra=grande] .ayuda, html[data-letra=grande] .interruptor { font-size: 16.5px; }
+html[data-letra=grande] .barra textarea, html[data-letra=grande] .fila-agregar input { font-size: 19px; }
+
+/* las animaciones (Ajustes › Apariencia): livianas = sin brillos ni sombras que se recalculan; ninguna = todo quieto */
+html[data-animaciones=livianas] .logo, html[data-animaciones=livianas] .protocolo .hex svg,
+html[data-animaciones=livianas] .pestana.activa svg { filter: none; }
+html[data-animaciones=livianas] .vista.activa, html[data-animaciones=livianas] .hablar.grabando,
+html[data-animaciones=livianas] .icono-boton.principal.grabando { animation: none; }
+html[data-animaciones=ninguna] *, html[data-animaciones=ninguna] *::before, html[data-animaciones=ninguna] *::after {
+  animation: none !important; transition: none !important; }

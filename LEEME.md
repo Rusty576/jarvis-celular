@@ -13,9 +13,14 @@ Dos formas de tener a JARVIS en el celular, con la misma pantalla:
 Las pestañas:
 
 - **Inicio**: como JARVIS en la PC. Tocás HABLAR (o decís «Jarvis…» con el manos libres prendido) y los protocolos.
+  Alrededor del reactor: la hora, el clima, la batería y lo próximo (tocándolo vas a Mi día).
 - **Charla**: escribile, hablale o mandale un archivo (el clip: fotos, PDF, audio, video o textos, hasta 15 MB).
-  Te hace documentos de Google Docs (botón para abrirlos) e imágenes (botón «Guardar imagen»). Al lado de mandar
-  está **Llamar** (el teléfono): manos libres, te escucha, piensa y te contesta hablando, hasta que digas «chau».
+  Te hace documentos de Google Docs (botón para abrirlos). Las fotos se ven en la charla: las que buscás
+  («mostrame fotos de…»), las imágenes que te hace («hacé una imagen de…»), la captura de pantalla de la PC y las
+  que mandás. Tocando una se ve grande, con «Guardar», «Compartir», «De dónde es» u «Otra versión» (deslizá para
+  pasar a la siguiente). Acá también llegan los avisos de JARVIS: el buen día, lo de la noche, los cuidados y lo
+  que contesta la PC. Al lado de mandar está **Llamar** (el teléfono): manos libres, te escucha, piensa y te
+  contesta hablando, hasta que digas «chau».
 - **Mi día**: el clima, tus recordatorios y tus pendientes.
 - **Mails**: los no leídos; te los lee, los resume o los contesta (mandar siempre con tu OK).
 
@@ -26,6 +31,20 @@ bot y la llave) no viaja a ningún servidor y queda guardada solo en tu celular.
 Sin internet, en la app de Android contesta el cerebro del celular (si lo bajaste, en Ajustes); si no, lo que
 escribas queda en una cola y sale solo cuando vuelve. Lo del teléfono (abrir apps, llamar, alarmas, la hora) anda
 igual.
+
+## Ajustes
+
+Están agrupados (tocá cada grupo para abrirlo):
+
+- **Voz**: cuándo lee las respuestas en voz alta, qué voz, la velocidad y el tono.
+- **Respuestas**: cómo te llama, si contesta corto o largo, y la app de música.
+- **Avisos**: dónde llegan (en la app, en Telegram o en los dos), la hora del buen día (o nunca), lo de la noche,
+  los cuidados y (en la app de Android) los recordatorios en el celular. Lo que dice «del bot» vale también para Telegram (si el bot es
+  viejo, aparece apagado hasta que lo actualices).
+- **Apariencia**: el color (celeste, rojo, dorado, verde o violeta), las animaciones (completas, livianas o
+  ninguna, para gastar menos batería), el tamaño de la letra y (en Android) si vibra al tocar.
+- **Cerebro sin internet** (la app de Android): bajarlo, y si usa la placa de video.
+- **«Hey Jarvis» y el asistente** (la app de Android).
 
 ## Instalarla
 

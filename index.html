@@ -63,6 +63,11 @@
   <section id="vista-inicio" class="vista activa">
     <div class="inicio-reactor" id="inicio-reactor">
       <canvas id="reactor-inicio"></canvas>
+      <!-- como un HUD: la hora, el clima, la batería y lo próximo, en las esquinas -->
+      <div class="hud-esquina izq"><b id="hud-hora">--:--</b><span id="hud-fecha"></span></div>
+      <div class="hud-esquina der" id="hud-der" hidden><b id="hud-clima"></b><span id="hud-cielo"></span></div>
+      <div class="hud-esquina abajo-izq" id="hud-bateria"></div>
+      <button type="button" class="hud-esquina abajo-der" id="hud-proximo" aria-label="Lo próximo"></button>
       <div class="inicio-estado" id="inicio-estado">EN LÍNEA</div>
     </div>
     <p class="inicio-texto" id="inicio-texto">Tocá el micrófono y hablame.</p>
@@ -184,57 +189,140 @@
   </div>
 </section>
 
-<!-- Ajustes -->
+<!-- Ajustes: por grupos que se abren y se cierran -->
 <dialog id="ajustes" class="hoja">
   <form method="dialog">
     <h2>AJUSTES</h2>
-    <label class="opcion">Leer las respuestas en voz alta (en la charla)
-      <select id="ajuste-leer">
-        <option value="auto">Cuando le hablo</option>
-        <option value="siempre">Siempre</option>
-        <option value="nunca">Nunca</option>
-      </select>
-    </label>
-    <label class="opcion">La música, con
-      <select id="ajuste-musica">
-        <option value="youtube">YouTube</option>
-        <option value="ytmusic">YouTube Music</option>
-        <option value="spotify">Spotify</option>
-      </select>
-    </label>
-    <label class="opcion">Voz de JARVIS
-      <select id="ajuste-voz"></select>
-    </label>
-    <label class="opcion">Velocidad de la voz <b id="velocidad-valor"></b>
-      <input id="ajuste-velocidad" type="range" min="0.8" max="1.5" step="0.05">
-    </label>
-    <div class="hoja-fila">
-      <button type="button" id="probar-voz" class="boton">Probar la voz</button>
-      <button type="button" id="ver-pc" class="boton">La PC</button>
-    </div>
-    <!-- solo en la app de Android -->
-    <div id="ajustes-nativos" hidden>
-      <!-- el cerebro sin internet: JARVIS piensa en el celular (como en la PC) -->
-      <div id="cerebro-caja" class="cerebro-caja" hidden>
-        <h3>CEREBRO SIN INTERNET</h3>
-        <p class="ayuda" id="cerebro-texto"></p>
-        <div class="progreso" id="cerebro-progreso" hidden><i></i></div>
-        <label class="opcion">El modelo
-          <select id="ajuste-modelo">
-            <option value="gemma4">Gemma 4 (2,6 GB): el mejor, como JARVIS en la PC</option>
-            <option value="qwen3">Qwen 3 (1 GB): liviano, para celulares con poca memoria</option>
-          </select>
-        </label>
-        <label class="interruptor"><input type="checkbox" id="ajuste-solo-wifi"><span>Bajarlo solo con wifi</span></label>
-        <div class="hoja-fila">
-          <button type="button" id="cerebro-bajar" class="boton principal">Bajar</button>
-          <button type="button" id="cerebro-cancelar" class="boton">Cancelar</button>
-          <button type="button" id="cerebro-borrar" class="boton peligro">Borrar</button>
+    <p class="ayuda" id="ajustes-bot-viejo" hidden>Algunas opciones (los avisos, cómo te llamo) necesitan el bot
+      actualizado: decile a JARVIS en la PC «actualizá el bot del celular».</p>
+
+    <details class="grupo" open>
+      <summary>Voz</summary>
+      <label class="opcion">Leer las respuestas en voz alta (en la charla)
+        <select id="ajuste-leer">
+          <option value="auto">Cuando le hablo</option>
+          <option value="siempre">Siempre</option>
+          <option value="nunca">Nunca</option>
+        </select>
+      </label>
+      <label class="opcion">Voz de JARVIS
+        <select id="ajuste-voz"></select>
+      </label>
+      <label class="opcion">Velocidad <b id="velocidad-valor"></b>
+        <input id="ajuste-velocidad" type="range" min="0.8" max="1.5" step="0.05">
+      </label>
+      <label class="opcion">Tono (más grave o más agudo) <b id="tono-valor"></b>
+        <input id="ajuste-tono" type="range" min="0.7" max="1.4" step="0.05">
+      </label>
+      <div class="hoja-fila">
+        <button type="button" id="probar-voz" class="boton">Probar la voz</button>
+      </div>
+    </details>
+
+    <details class="grupo">
+      <summary>Respuestas</summary>
+      <label class="opcion">Cómo te llamo
+        <input id="ajuste-nombre" class="del-bot" maxlength="30" placeholder="Tu nombre (o «señor», como Tony)" autocomplete="off">
+      </label>
+      <label class="opcion">El largo de las respuestas
+        <select id="ajuste-largo" class="del-bot">
+          <option value="corto">Cortas, al grano</option>
+          <option value="normal">Normales</option>
+          <option value="largo">Detalladas (cuando haga falta)</option>
+        </select>
+      </label>
+      <label class="opcion">La música, con
+        <select id="ajuste-musica">
+          <option value="youtube">YouTube</option>
+          <option value="ytmusic">YouTube Music</option>
+          <option value="spotify">Spotify</option>
+        </select>
+      </label>
+    </details>
+
+    <details class="grupo">
+      <summary>Avisos</summary>
+      <label class="opcion">Dónde te aviso (el buen día, lo de la PC, los recordatorios)
+        <select id="ajuste-avisos-en" class="del-bot">
+          <option value="app">En la app</option>
+          <option value="telegram">En Telegram</option>
+          <option value="ambos">En los dos</option>
+        </select>
+      </label>
+      <label class="opcion">El buen día (el clima y lo que tenés hoy)
+        <select id="ajuste-buen-dia" class="del-bot">
+          <option value="-1">No, gracias</option>
+          <option value="6">A las 6</option>
+          <option value="7">A las 7</option>
+          <option value="8">A las 8</option>
+          <option value="9">A las 9</option>
+          <option value="10">A las 10</option>
+          <option value="11">A las 11</option>
+        </select>
+      </label>
+      <label class="interruptor"><input type="checkbox" id="ajuste-noche" class="del-bot">
+        <span>A la noche, lo que tenés mañana</span></label>
+      <label class="interruptor"><input type="checkbox" id="ajuste-cuidados" class="del-bot">
+        <span>Cuidarte: si jugás de madrugada o muchas horas seguidas</span></label>
+      <label class="interruptor solo-nativa"><input type="checkbox" id="ajuste-avisos">
+        <span>Los recordatorios suenan desde el celular (aunque no haya internet)</span></label>
+      <p class="ayuda solo-nativa">Con la app cerrada, los avisos llegan como notificación (puede tardar unos minutos).</p>
+    </details>
+
+    <details class="grupo">
+      <summary>Apariencia</summary>
+      <div class="opcion">Color
+        <div class="colores" id="ajuste-colores">
+          <button type="button" data-color="celeste" aria-label="Celeste"></button>
+          <button type="button" data-color="rojo" aria-label="Rojo"></button>
+          <button type="button" data-color="dorado" aria-label="Dorado"></button>
+          <button type="button" data-color="verde" aria-label="Verde"></button>
+          <button type="button" data-color="violeta" aria-label="Violeta"></button>
         </div>
       </div>
-      <label class="interruptor"><input type="checkbox" id="ajuste-avisos">
-        <span>Avisarme los recordatorios desde el celular (suenan aunque no haya internet)</span></label>
-      <h3 class="titulo-ajuste">«HEY JARVIS»</h3>
+      <label class="opcion">Animaciones
+        <select id="ajuste-animaciones">
+          <option value="completas">Completas</option>
+          <option value="livianas">Livianas (más fluido, gasta menos batería)</option>
+          <option value="ninguna">Sin animaciones</option>
+        </select>
+      </label>
+      <label class="opcion">Tamaño de la letra
+        <select id="ajuste-letra">
+          <option value="chica">Chica</option>
+          <option value="normal">Normal</option>
+          <option value="grande">Grande</option>
+        </select>
+      </label>
+      <label class="interruptor solo-nativa"><input type="checkbox" id="ajuste-vibrar"><span>Vibrar al tocar</span></label>
+    </details>
+
+    <!-- solo en la app de Android -->
+    <div id="ajustes-nativos" hidden>
+      <details class="grupo">
+        <summary>Cerebro sin internet</summary>
+        <!-- el cerebro sin internet: JARVIS piensa en el celular (como en la PC) -->
+        <div id="cerebro-caja" class="cerebro-caja" hidden>
+          <p class="ayuda" id="cerebro-texto"></p>
+          <div class="progreso" id="cerebro-progreso" hidden><i></i></div>
+          <label class="opcion">El modelo
+            <select id="ajuste-modelo">
+              <option value="gemma4">Gemma 4 (2,6 GB): el mejor, como JARVIS en la PC</option>
+              <option value="qwen3">Qwen 3 (1 GB): liviano, para celulares con poca memoria</option>
+            </select>
+          </label>
+          <label class="interruptor"><input type="checkbox" id="ajuste-solo-wifi"><span>Bajarlo solo con wifi</span></label>
+          <label class="interruptor"><input type="checkbox" id="ajuste-placa">
+            <span>Usar la placa de video (más rápido; si en tu celular contesta mal, se apaga sola)</span></label>
+          <div class="hoja-fila">
+            <button type="button" id="cerebro-bajar" class="boton principal">Bajar</button>
+            <button type="button" id="cerebro-cancelar" class="boton">Cancelar</button>
+            <button type="button" id="cerebro-borrar" class="boton peligro">Borrar</button>
+          </div>
+        </div>
+      </details>
+      <details class="grupo">
+      <summary>«Hey Jarvis» y el asistente</summary>
       <label class="opcion">Qué tan fácil se despierta
         <select id="ajuste-sensibilidad">
           <option value="alta">Fácil (si no te escucha)</option>
@@ -254,8 +342,8 @@
         <button type="button" id="ajuste-asistente" class="boton">Asistente del celular</button>
         <button type="button" id="ajuste-bateria" class="boton" hidden>Que la batería no lo apague</button>
         <button type="button" id="ajuste-permisos" class="boton">Permisos</button>
-        <button type="button" id="ajuste-actualizar" class="boton">Actualizar</button>
       </div>
+      </details>
     </div>
     <!-- en la web app, en un Android: la app de verdad -->
     <div id="ajustes-android" hidden>
@@ -265,6 +353,10 @@
         <button type="button" id="conectar-android" class="boton">Conectarla a este JARVIS</button>
       </div>
     </div>
+    <div class="hoja-fila otros">
+      <button type="button" id="ver-pc" class="boton">La PC</button>
+      <button type="button" id="ajuste-actualizar" class="boton solo-nativa">Buscar actualización</button>
+    </div>
     <p class="ayuda" id="ajustes-info"></p>
     <div class="hoja-botones">
       <button type="button" id="desconectar" class="boton peligro">Desconectar este celular</button>
@@ -272,6 +364,32 @@
     </div>
   </form>
 </dialog>
+
+<!-- El visor: una imagen entera, a pantalla completa (deslizá para pasar de foto) -->
+<div id="visor" class="visor" hidden>
+  <div class="visor-barra">
+    <button type="button" id="visor-cerrar" class="icono-boton" aria-label="Cerrar">
+      <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+    <span id="visor-cuenta"></span>
+  </div>
+  <div class="visor-foto" id="visor-foto">
+    <button type="button" id="visor-anterior" class="visor-flecha izq" aria-label="Anterior">
+      <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>
+    </button>
+    <img id="visor-img" alt="">
+    <button type="button" id="visor-siguiente" class="visor-flecha der" aria-label="Siguiente">
+      <svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg>
+    </button>
+  </div>
+  <p class="visor-texto" id="visor-texto"></p>
+  <div class="visor-botones">
+    <button type="button" id="visor-guardar" class="boton">⤓ Guardar</button>
+    <button type="button" id="visor-compartir" class="boton">↗ Compartir</button>
+    <button type="button" id="visor-fuente" class="boton">De dónde es</button>
+    <button type="button" id="visor-otra" class="boton principal">↻ Otra versión</button>
+  </div>
+</div>
 
 <div id="aviso" class="cartel" hidden></div>
 
