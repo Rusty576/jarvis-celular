@@ -15,7 +15,7 @@
 // ============================================================
 "use strict";
 
-const VERSION_APP = "2026.10.25.6";
+const VERSION_APP = "2026.10.25.7";
 const ANDROID_WEB = "https://rusty576.github.io/jarvis-celular/android/";   // el APK y su version.json
 const $ = (id) => document.getElementById(id);
 const Reco = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -287,12 +287,12 @@ function avisar(texto, segundos = 3.5, boton = null) {
 }
 
 
-// ---------- Los reactores (Inicio y la llamada) ----------
+// ---------- El reactor de Inicio (y la luz de Live) ----------
 
-let reactorInicio = null, reactorLlamada = null;
+let reactorInicio = null;
 function vozReactores(nivel) {
   if (reactorInicio) reactorInicio.voz(nivel);
-  if (reactorLlamada) reactorLlamada.voz(nivel);
+  if (llamada.activa) nivelLive(nivel);   // (en Live, la luz de abajo)
 }
 
 
@@ -1718,8 +1718,13 @@ function pintarTarjeta(t, indiceMensaje, indiceTarjeta) {
   return caja;
 }
 
+function listaDeMensajes() {
+  // (en la ventanita, lo que se habla se ve en su tarjeta; la charla de la app se redibuja al volver)
+  return burbuja.activa ? $("burbuja-charla") : $("mensajes");
+}
+
 function bajar() {
-  const lista = $("mensajes");
+  const lista = listaDeMensajes();
   lista.scrollTop = lista.scrollHeight;
 }
 
@@ -1762,8 +1767,14 @@ function agregar(m) {
   mensajes.push(m);
   if (mensajes.length > 150) mensajes = mensajes.slice(-150);
   guardarCharla();
-  if (mensajes.length === 1) pintarCharla();
-  else $("mensajes").appendChild(pintarMensaje(m, mensajes.length - 1));
+  if (burbuja.activa) {
+    burbuja.charlaSucia = true;
+    $("burbuja-charla").appendChild(pintarMensaje(m, mensajes.length - 1));
+  } else if (mensajes.length === 1) {
+    pintarCharla();
+  } else {
+    $("mensajes").appendChild(pintarMensaje(m, mensajes.length - 1));
+  }
   bajar();
   if ((m.aviso || m.sincronizado) && vistaActual !== "charla") marcarNovedad(true);
   return m;
@@ -1809,15 +1820,17 @@ function pensando(si) {
     const div = document.createElement("div");
     div.className = "msg jarvis pensando";
     div.textContent = "Pensando";
-    $("mensajes").appendChild(div);
+    listaDeMensajes().appendChild(div);
     bajar();
   }
 }
 
 async function mandar(texto, opciones = {}) {
-  // Le manda algo a JARVIS y muestra la respuesta. opciones: {foto, archivo, audio, llamada, porVoz, sinVoz}
+  // Le manda algo a JARVIS y muestra la respuesta. opciones: {foto, archivo, audio, llamada, porVoz, sinVoz, vista}
+  // (vista: Live, lo que ve la cámara o la pantalla; se pide recién si no era algo para hacer en el celular)
   // Devuelve siempre {texto, tarjetas, acciones}: si falló, texto es el motivo de verdad (y error: true)
-  const foto = opciones.foto || null, archivo = opciones.archivo || null;
+  let foto = opciones.foto || null, contexto = "";
+  const archivo = opciones.archivo || null;
   const mio = agregar({quien: "vos", texto: texto || (opciones.audio ? "🎙️ ..." : ""), imagen: foto ? foto.miniatura : null,
                        archivo: archivo ? archivo.nombre : null});
   // un archivo de texto, sin internet: lo lee el cerebro del celular
@@ -1826,6 +1839,17 @@ async function mandar(texto, opciones = {}) {
   if (local) {
     agregar({quien: "jarvis", texto: local.texto, acciones: local.acciones});
     return {texto: local.texto, tarjetas: [], acciones: local.acciones, local: true, callado: local.callado};
+  }
+  if (!foto && opciones.vista && hayInternet()) {
+    const vista = await opciones.vista();
+    if (vista) {
+      foto = vista.foto;
+      contexto = vista.contexto;
+      if (foto.miniatura) {
+        mio.imagen = foto.miniatura;
+        redibujar(mio);
+      }
+    }
   }
   const sinInternet = () => {
     // sin internet y sin el cerebro del celular: lo escrito queda en la cola y sale solo cuando vuelve
@@ -1866,7 +1890,8 @@ async function mandar(texto, opciones = {}) {
   }
   pensando(true);
   try {
-    const r = await api("app_mensaje", {texto: texto || "", llamada: !!opciones.llamada, audio: opciones.audio || null,
+    const r = await api("app_mensaje", {texto: (contexto && texto ? contexto + " " : "") + (texto || ""),
+                                         llamada: !!opciones.llamada, audio: opciones.audio || null,
                                          imagen: foto ? {mime: "image/jpeg", datos: foto.datos} : null,
                                          archivo: archivo ? {mime: archivo.mime, datos: archivo.datos, nombre: archivo.nombre} : null},
                         archivo ? 180 : 100);
@@ -2431,39 +2456,62 @@ function fotoYPreguntar() {
 }
 
 
-// ---------- La llamada: manos libres ----------
+// ---------- Live: charlar manos libres (como Gemini Live) ----------
+// Te escucha, piensa y te contesta hablando, una y otra vez, hasta que digas «chau» o toques la X. Le podés mostrar lo
+// que ve la cámara o (en la app de Android) tu pantalla: cada vez que le hablás, le manda una foto de eso.
 
-const llamada = {activa: false, pausada: false, silencios: 0, inicio: 0, reloj: null, pantalla: null, tocar: null};
+const llamada = {activa: false, pausada: false, silencios: 0, inicio: 0, reloj: null, pantalla: null, tocar: null,
+                 camara: null, frente: false, viendo: false, mini: false, subtitulos: leerGuardado("subtitulos", true)};
+const ETIQUETAS_LIVE = {escuchando: "Te escucho", pensando: "Pensando", hablando: "", libre: "En pausa"};
 
 function estadoLlamada(estado, texto) {
-  const etiquetas = {escuchando: "TE ESCUCHO", pensando: "PENSANDO", hablando: "JARVIS", libre: "EN PAUSA"};
-  $("llamada-estado").textContent = etiquetas[estado] || estado;
-  $("llamada-estado").className = "llamada-estado " + estado;
-  reactorLlamada.estado(estado);
-  if (texto !== undefined) $("llamada-texto").textContent = texto;
+  const live = $("live");
+  live.classList.remove("escuchando", "pensando", "hablando", "libre");
+  live.classList.add(estado);
+  $("live-estado").textContent = ETIQUETAS_LIVE[estado] !== undefined ? ETIQUETAS_LIVE[estado] : estado;
+  if (llamada.mini && Nativo.hay && window.JarvisNativo.pildora) {   // (Live chiquito: lo dice la píldora de arriba)
+    window.JarvisNativo.pildora(estado === "libre" ? "En pausa · tocá para seguir" : ETIQUETAS_LIVE[estado] || "Hablando");
+  }
+  if (texto !== undefined) $("live-texto").textContent = texto;
+  nivelLive(estado === "libre" ? 0.05 : estado === "pensando" ? 0.45 : 0.3);
+}
+
+let bajarLuz = null;
+function nivelLive(nivel) {
+  // la luz de abajo late con la voz: sube con cada sonido y vuelve sola
+  if (!llamada.activa) return;
+  $("live").style.setProperty("--nivel", Math.max(0, Math.min(1, nivel)).toFixed(2));
+  clearTimeout(bajarLuz);
+  bajarLuz = setTimeout(() => $("live").style.setProperty("--nivel", "0.3"), 260);
 }
 
 function esperarToque() {
   return new Promise((listo) => { llamada.tocar = listo; });
 }
 
-async function llamar() {
+async function llamar(opciones = {}) {
+  // opciones.pantalla: arranca mostrándole la pantalla (el botón «Compartir pantalla con Live» de la ventanita)
   if (!conexion) return mostrarConectar();
   if (llamada.activa) return;
   Voz.callar();
-  Object.assign(llamada, {activa: true, pausada: false, silencios: 0, inicio: Date.now()});
-  Oido.soltar();   // si estaba esperando «Jarvis», deja el micrófono (para cuando termine el saludo ya está libre)
+  Object.assign(llamada, {activa: true, pausada: false, silencios: 0, inicio: Date.now(), mini: false});
+  Oido.soltar();   // si estaba esperando «Jarvis», deja el micrófono
   $("aviso").hidden = true;
-  $("llamada").hidden = false;
-  $("llamada-tarjetas").innerHTML = "";
-  $("boton-pausa").classList.remove("pausado");
-  reactorLlamada.prender();
+  const live = $("live");
+  live.hidden = false;
+  live.classList.toggle("sin-subtitulos", !llamada.subtitulos);
+  $("live-subtitulos").classList.toggle("activo", llamada.subtitulos);
+  $("live-tarjetas").innerHTML = "";
+  $("live-pantalla").hidden = !puedeVerPantalla();
+  $("live-viendo").hidden = true;
   if (reactorInicio) reactorInicio.apagar();
+  $("live-tiempo").textContent = "00:00";
   llamada.reloj = setInterval(() => {
     const s = Math.floor((Date.now() - llamada.inicio) / 1000);
-    $("llamada-tiempo").textContent = String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
+    $("live-tiempo").textContent = String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
   }, 1000);
   calentar();
+  if (burbuja.activa && Nativo.hay) window.JarvisNativo.ventana("live");
   if (Nativo.hay) {   // que la pantalla no se apague mientras hablan
     window.JarvisNativo.pantallaPrendida(true);
   } else {
@@ -2471,32 +2519,31 @@ async function llamar() {
       llamada.pantalla = await navigator.wakeLock.request("screen");
     } catch (e) { /* no se puede: sigue igual */ }
   }
-  estadoLlamada("hablando", "Hola, te escucho.");
-  await Voz.decir("Hola, te escucho.");
+  estadoLlamada("escuchando", "");
+  if (opciones.pantalla) await verPantallaLive(true);
   cicloLlamada();
 }
 
 function esCortar(texto) {
   const t = normalizar(texto);
-  return /^(chau|chao|adios|nos vemos|hasta luego|colga|colgamos|corta|corta la llamada|corto|termina la llamada)( jarvis)?$/.test(t);
+  return /^(chau|chao|adios|nos vemos|hasta luego|colga|colgamos|corta|corta la llamada|corto|termina|terminamos|termina la llamada|fin)( jarvis)?$/.test(t);
 }
 
 async function cicloLlamada() {
   while (llamada.activa) {
     if (llamada.pausada) {
-      estadoLlamada("libre", "El micrófono está en pausa. Tocá el reactor (o el micrófono) para seguir.");
+      estadoLlamada("libre", "Tocá ▶ (o la pantalla) para seguir.");
       await esperarToque();
       llamada.pausada = false;
-      $("boton-pausa").classList.remove("pausado");
       continue;
     }
     estadoLlamada("escuchando", "");
     if (navigator.vibrate) navigator.vibrate(25);
-    const oido = await Oido.oir((parcial) => { $("llamada-texto").textContent = parcial; });
+    const oido = await Oido.oir((parcial) => { $("live-texto").textContent = parcial; });
     if (!llamada.activa) return;
     if (oido.error === "not-allowed" || oido.error === "service-not-allowed") {
       await Voz.decir("No tengo permiso para usar el micrófono.");
-      avisar(`Dale permiso al micrófono a la app (${DONDE_PERMISOS}) y llamame de nuevo.`, 7);
+      avisar(`Dale permiso al micrófono a la app (${DONDE_PERMISOS}) y abrí Live de nuevo.`, 7);
       return colgar();
     }
     if (sinOidoSinInternet(oido)) {
@@ -2515,16 +2562,16 @@ async function cicloLlamada() {
       return colgar();
     }
     estadoLlamada("pensando", oido.texto ? "«" + oido.texto + "»" : "");
-    const r = await mandar(oido.texto, {llamada: true, audio: oido.audio, hablarYa: true,
+    const r = await mandar(oido.texto, {llamada: true, audio: oido.audio, hablarYa: true, vista: vistaDeLive,
                                         alEscribir: (t) => estadoLlamada("hablando", t)});
     if (!llamada.activa) return;
     let respuesta = r ? r.texto : "Uy, no me pude conectar. ¿Probamos de nuevo?";
-    $("llamada-tarjetas").innerHTML = "";
-    if (r && r.acciones.length) {   // abrir una app, música, WhatsApp: el botón aparece en la llamada
-      pintarAcciones($("llamada-tarjetas"), r.acciones);
+    $("live-tarjetas").innerHTML = "";
+    if (r && r.acciones.length) {   // abrir una app, música, WhatsApp: el botón aparece en Live
+      pintarAcciones($("live-tarjetas"), r.acciones);
     }
-    if (r && r.tarjetas.length) {   // hay que confirmar algo: los botones aparecen en la llamada también
-      r.tarjetas.forEach((t, i) => $("llamada-tarjetas").appendChild(pintarTarjeta(t, mensajes.length - 1, i)));
+    if (r && r.tarjetas.length) {   // hay que confirmar algo: los botones aparecen en Live también
+      r.tarjetas.forEach((t, i) => $("live-tarjetas").appendChild(pintarTarjeta(t, mensajes.length - 1, i)));
       if (!respuesta) respuesta = "Confirmalo en la pantalla.";
     }
     estadoLlamada("hablando", respuesta);
@@ -2541,10 +2588,18 @@ function colgar() {
   clearInterval(llamada.reloj);
   if (llamada.pantalla) llamada.pantalla.release().catch(() => {});
   llamada.pantalla = null;
+  camaraLive(false);
+  if (llamada.viendo) {
+    llamada.viendo = false;
+    if (Nativo.hay && window.JarvisNativo.dejarDeCompartir) window.JarvisNativo.dejarDeCompartir();
+  }
+  if (llamada.mini && Nativo.hay) window.JarvisNativo.ventana("live");   // (saca la píldora)
+  llamada.mini = false;
   if (Nativo.hay) window.JarvisNativo.pantallaPrendida(false);
   if (llamada.tocar) llamada.tocar();
-  reactorLlamada.apagar();
-  $("llamada").hidden = true;
+  $("live").hidden = true;
+  $("live").classList.remove("con-camara");
+  if (burbuja.activa) return cerrarBurbuja();   // (Live desde la ventanita: termina y volvés a lo que estabas)
   if (vistaActual === "inicio" && reactorInicio) reactorInicio.prender();
   if (escucha.activa) cicloJarvis();
 }
@@ -2557,8 +2612,8 @@ function tocarReactor() {
     llamada.tocar = null;
     return seguir();
   }
-  if ($("llamada-estado").classList.contains("hablando")) Voz.callar();
-  else if ($("llamada-estado").classList.contains("escuchando")) Oido.cortar();
+  if ($("live").classList.contains("hablando")) Voz.callar();
+  else if ($("live").classList.contains("escuchando")) Oido.cortar();
 }
 
 function pausar() {
@@ -2568,9 +2623,317 @@ function pausar() {
     return;
   }
   llamada.pausada = true;
-  $("boton-pausa").classList.add("pausado");
   Oido.cancelar();
   Voz.callar();
+}
+
+function subtitulosLive() {
+  llamada.subtitulos = !llamada.subtitulos;
+  guardar("subtitulos", llamada.subtitulos);
+  $("live").classList.toggle("sin-subtitulos", !llamada.subtitulos);
+  $("live-subtitulos").classList.toggle("activo", llamada.subtitulos);
+}
+
+// La cámara: lo que ve, se lo muestra a JARVIS cada vez que le hablás («¿qué planta es esta?», «¿cómo lo armo?»)
+async function camaraLive(si) {
+  const video = $("live-video");
+  if (!si) {
+    if (!llamada.camara) return;   // (no estaba prendida: el <video> ni se toca)
+    llamada.camara.getTracks().forEach((t) => t.stop());
+    llamada.camara = null;
+    video.srcObject = null;
+    video.hidden = true;
+    $("live").classList.remove("con-camara");
+    $("live-camara").classList.remove("activo");
+    $("live-girar").hidden = true;
+    return;
+  }
+  if (llamada.viendo) await verPantallaLive(false);   // (o la cámara o la pantalla)
+  if (Nativo.hay && !Nativo.ya("permisos").camara && !(await Nativo.cuando("pedirPermiso", "camara")).si) {
+    avisar(`Para mostrarle lo que ves, dale permiso a la cámara (${DONDE_PERMISOS}).`, 6);
+    return;
+  }
+  try {
+    const flujo = await navigator.mediaDevices.getUserMedia({audio: false,
+      video: {facingMode: llamada.frente ? "user" : "environment", width: {ideal: 1280}, height: {ideal: 720}}});
+    if (llamada.camara) llamada.camara.getTracks().forEach((t) => t.stop());
+    llamada.camara = flujo;
+  } catch (e) {
+    avisar("No pude prender la cámara.", 4);
+    return;
+  }
+  video.srcObject = llamada.camara;
+  video.hidden = false;
+  video.play().catch(() => {});
+  $("live").classList.add("con-camara");
+  $("live-camara").classList.add("activo");
+  $("live-girar").hidden = false;
+}
+
+function fotoDeLaCamara() {
+  // lo que se ve ahora en la cámara, como foto (para mandársela con lo que preguntaste)
+  const video = $("live-video");
+  if (!video.videoWidth) return null;
+  const dibujar = (lado, calidad) => {
+    const escala = Math.min(1, lado / Math.max(video.videoWidth, video.videoHeight));
+    const lienzo = document.createElement("canvas");
+    lienzo.width = Math.round(video.videoWidth * escala);
+    lienzo.height = Math.round(video.videoHeight * escala);
+    lienzo.getContext("2d").drawImage(video, 0, 0, lienzo.width, lienzo.height);
+    return lienzo.toDataURL("image/jpeg", calidad);
+  };
+  return {datos: dibujar(1024, 0.8).split(",")[1], miniatura: dibujar(220, 0.6)};
+}
+
+async function miniaturaDeDatos(base64) {
+  const img = new Image();
+  await new Promise((listo, error) => { img.onload = listo; img.onerror = error; img.src = "data:image/jpeg;base64," + base64; });
+  const escala = Math.min(1, 220 / Math.max(img.naturalWidth, img.naturalHeight));
+  const lienzo = document.createElement("canvas");
+  lienzo.width = Math.round(img.naturalWidth * escala);
+  lienzo.height = Math.round(img.naturalHeight * escala);
+  lienzo.getContext("2d").drawImage(img, 0, 0, lienzo.width, lienzo.height);
+  return lienzo.toDataURL("image/jpeg", 0.6);
+}
+
+async function vistaDeLive() {
+  // Lo que Live le muestra a JARVIS con cada cosa que le decís: la cámara, o la pantalla (mientras Live está chiquito;
+  // agrandado, en la pantalla se ve Live)
+  if (llamada.camara) {
+    const foto = fotoDeLaCamara();
+    if (foto) return {foto: foto, contexto: "(Te muestro lo que ve ahora la cámara de mi celular.)"};
+  }
+  if (llamada.viendo && llamada.mini && Nativo.hay) {
+    const r = await Nativo.cuando("capturarPantalla");
+    if (r.ok && r.imagen) {
+      let miniatura = null;
+      try { miniatura = await miniaturaDeDatos(r.imagen); } catch (e) { /* sin miniatura */ }
+      return {foto: {datos: r.imagen, miniatura: miniatura}, contexto: "(Te muestro lo que hay ahora en la pantalla de mi celular.)"};
+    }
+  }
+  return null;
+}
+
+// La pantalla (solo en la app de Android): Android pregunta si se la mostrás; Live queda chiquito flotando arriba (la
+// píldora de Android) y usás el celular mientras le hablás
+const puedeVerPantalla = () => Nativo.hay && !!window.JarvisNativo.compartirPantalla;
+
+async function verPantallaLive(si) {
+  if (!si) {
+    if (llamada.viendo && Nativo.hay) window.JarvisNativo.dejarDeCompartir();
+    llamada.viendo = false;
+    $("live-pantalla").classList.remove("activo");
+    $("live-viendo").hidden = true;
+    if (llamada.mini) liveMini(false);
+    return;
+  }
+  if (!puedeVerPantalla()) return;
+  await camaraLive(false);
+  const r = await Nativo.cuando("compartirPantalla");
+  if (!r.ok) {
+    if (r.error !== "cancelado") avisar("Android no dejó compartir la pantalla.", 5);
+    return;
+  }
+  llamada.viendo = true;
+  $("live-pantalla").classList.add("activo");
+  liveMini(true);
+}
+
+function liveMini(si) {
+  // Chiquito: JARVIS se va atrás y queda la píldora flotando arriba (Android), para usar el celular mientras le hablás.
+  // Sin el permiso «Mostrar sobre otras apps» no hay píldora: primero se ofrece (después, «Achicar» va igual, y se
+  // vuelve tocando la notificación)
+  if (si && Nativo.hay && window.JarvisNativo.pantallaEstado && !Nativo.ya("pantallaEstado").sobreApps && !llamada.pedidoSobreApps) {
+    llamada.pedidoSobreApps = true;
+    $("live-viendo").hidden = false;
+    avisar("Para que Live quede arriba mientras usás el celular, dale el permiso «Mostrar sobre otras apps» y tocá «Achicar».",
+           14, {texto: "Dar permiso", hacer: () => window.JarvisNativo.permisoSobreApps()});
+    return;
+  }
+  llamada.mini = si;
+  $("live-viendo").hidden = si || !llamada.viendo;
+  if (!Nativo.hay) return;
+  window.JarvisNativo.ventana(si ? "mini" : "live");
+  if (si) estadoLlamada([...$("live").classList].find((c) => ETIQUETAS_LIVE[c] !== undefined) || "escuchando");
+}
+
+Nativo.al("pildora", (d) => {   // tocaste la píldora: ⤢ (Live grande), ✕ (terminar) o el texto (si estaba en pausa, sigue)
+  if (!llamada.activa) return;
+  if (d.accion === "abrir") liveMini(false);
+  else if (d.accion === "fin") colgar();
+  else tocarReactor();
+});
+
+Nativo.al("pantalla", (d) => {   // dejaste de compartir desde la notificación (o desde Android)
+  if (d.compartiendo || !llamada.viendo) return;
+  llamada.viendo = false;
+  $("live-pantalla").classList.remove("activo");
+  $("live-viendo").hidden = true;
+  if (llamada.activa && llamada.mini) colgar();   // (Live chiquito sin la pantalla no tiene sentido: termina)
+});
+
+
+// ---------- La ventanita (como la del asistente de Google) ----------
+// En la app de Android: al mantener apretado inicio, al decir «Hey Jarvis», o con el widget, JARVIS se abre como una
+// barrita abajo, encima de la app en la que estabas (sin taparla). Es la misma página que la app (la misma charla):
+// Android la pasa a una ventana transparente y avisa con el evento «modo».
+
+const burbuja = {activa: false, sesion: null, ocupada: false, adjunto: null, charlaSucia: false};
+
+function ponerModo(d) {
+  const enBurbuja = !!d && d.modo === "burbuja";
+  const antes = burbuja.activa;
+  burbuja.activa = enBurbuja;
+  document.documentElement.classList.toggle("modo-burbuja", enBurbuja);
+  $("burbuja").hidden = !enBurbuja;
+  if (!enBurbuja) {
+    if (antes) {
+      if (burbuja.charlaSucia) pintarCharla();   // (lo que hablaste en la ventanita, ahora en la charla)
+      burbuja.charlaSucia = false;
+      if (llamada.activa && llamada.mini) liveMini(false);   // Live chiquito y abriste la app: Live grande, en la app
+    }
+    if (vistaActual === "inicio" && reactorInicio && !llamada.activa) reactorInicio.prender();
+    return;
+  }
+  if (!conexion) return abrirEnLaApp();   // (todavía no está conectada: eso se hace en la app)
+  if (reactorInicio) reactorInicio.apagar();
+  $("aviso").hidden = true;
+  if (d.sesion !== burbuja.sesion) {   // una ventanita nueva: empieza de cero (la charla de la app sigue igual)
+    burbuja.sesion = d.sesion;
+    $("burbuja-charla").innerHTML = "";
+    $("burbuja-hoja").hidden = true;
+    $("burbuja-caja").value = "";
+    sacarAdjuntoBurbuja();
+    barraBurbuja();
+  }
+  $("burbuja-compartir").hidden = !puedeVerPantalla() || llamada.activa;
+  if (d.ventana === "mini" || d.ventana === "live") {
+    if (!llamada.activa) llamar();
+    else liveMini(d.ventana === "mini" && llamada.viendo);
+    return;
+  }
+  if (llamada.activa) return;   // (Live sigue: la ventanita lo muestra)
+  if (Nativo.hay) window.JarvisNativo.ventana("barra");
+  if (d.escuchar) escucharEnBurbuja();
+}
+
+function cerrarBurbuja() {
+  Voz.callar();
+  Oido.cancelar();
+  burbuja.sesion = null;   // (la próxima vez, de cero)
+  if (Nativo.hay) window.JarvisNativo.ventana("cerrar");
+}
+
+function abrirEnLaApp() {
+  // como «Abrir en Gemini»: la app entera, en la charla (con lo que hablaste acá)
+  Voz.callar();
+  Oido.cancelar();
+  burbuja.sesion = null;
+  if (Nativo.hay) window.JarvisNativo.ventana("app");
+}
+
+function barraBurbuja() {
+  $("burbuja-barra").classList.toggle("con-texto", !!$("burbuja-caja").value.trim() || !!burbuja.adjunto);
+}
+
+function mostrarAdjuntoBurbuja(adjunto) {
+  burbuja.adjunto = adjunto;
+  $("burbuja-adjunto").hidden = false;
+  $("burbuja-adjunto-img").src = adjunto.tipo === "foto" ? adjunto.miniatura : "";
+  $("burbuja-adjunto-texto").textContent = adjunto.tipo === "foto" ? "Foto lista" : "📄 " + adjunto.nombre;
+  $("burbuja-caja").placeholder = "¿Qué querés saber de esto?";
+  barraBurbuja();
+}
+
+function sacarAdjuntoBurbuja() {
+  burbuja.adjunto = null;
+  $("burbuja-adjunto").hidden = true;
+  $("burbuja-archivo").value = "";
+  $("burbuja-caja").placeholder = "Preguntarle a JARVIS";
+  barraBurbuja();
+}
+
+async function preguntarEnBurbuja(texto, porVoz) {
+  if (burbuja.ocupada) return;
+  const adjunto = burbuja.adjunto;
+  if (!texto && !adjunto) return;
+  burbuja.ocupada = true;
+  $("burbuja-caja").value = "";
+  sacarAdjuntoBurbuja();
+  $("burbuja-hoja").hidden = false;
+  $("burbuja-compartir").hidden = true;
+  try {
+    const opciones = {porVoz: porVoz, sinVoz: !porVoz};
+    if (adjunto && adjunto.tipo === "foto") opciones.foto = adjunto;
+    else if (adjunto) opciones.archivo = adjunto;
+    await mandar(texto || "", opciones);
+  } finally {
+    burbuja.ocupada = false;
+  }
+}
+
+async function escucharEnBurbuja() {
+  // el micrófono de la barrita: te escucha, y lo que dijiste va al toque (la respuesta se dice en voz alta)
+  if (burbuja.ocupada) {
+    Voz.callar();
+    Oido.cortar();
+    Cerebro.parar();
+    return;
+  }
+  burbuja.ocupada = true;
+  Voz.callar();
+  calentar();
+  const barra = $("burbuja-barra"), caja = $("burbuja-caja");
+  barra.classList.add("escuchando");
+  caja.placeholder = "Te escucho…";
+  let r;
+  try {
+    await Oido.soltar();
+    r = await Oido.oir((parcial) => { caja.value = parcial; });
+  } finally {
+    barra.classList.remove("escuchando");
+    caja.placeholder = burbuja.adjunto ? "¿Qué querés saber de esto?" : "Preguntarle a JARVIS";
+    burbuja.ocupada = false;
+  }
+  caja.value = "";
+  barraBurbuja();
+  if (sinOidoSinInternet(r)) return avisoOidoSinInternet();
+  if (r.error === "not-allowed") return avisar(`Dale permiso al micrófono para hablarme (${DONDE_PERMISOS}).`, 6);
+  if (r.audio) {
+    burbuja.ocupada = true;
+    $("burbuja-hoja").hidden = false;
+    try { await mandar("", {audio: r.audio, porVoz: true}); } finally { burbuja.ocupada = false; }
+    return;
+  }
+  if (r.texto) await preguntarEnBurbuja(r.texto, true);
+}
+
+function conectarBurbuja() {
+  $("burbuja-fuera").onclick = cerrarBurbuja;
+  $("burbuja-cerrar").onclick = cerrarBurbuja;
+  $("burbuja-abrir").onclick = abrirEnLaApp;
+  $("burbuja-live").onclick = () => llamar();
+  $("burbuja-compartir").onclick = () => llamar({pantalla: true});
+  $("burbuja-caja").addEventListener("input", barraBurbuja);
+  $("burbuja-barra").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const texto = $("burbuja-caja").value.trim();
+    if (texto || burbuja.adjunto) preguntarEnBurbuja(texto, false);
+    else escucharEnBurbuja();
+  });
+  $("burbuja-mas").onclick = () => $("burbuja-archivo").click();
+  $("burbuja-archivo").onchange = async () => {
+    const archivo = $("burbuja-archivo").files[0];
+    if (!archivo) return;
+    try {
+      mostrarAdjuntoBurbuja(await prepararAdjunto(archivo));
+    } catch (e) {
+      $("burbuja-archivo").value = "";
+      avisar(e.message && !/onload|Event/.test(e.message) ? e.message : "No pude abrir ese archivo.", 5);
+    }
+  };
+  $("burbuja-adjunto-sacar").onclick = sacarAdjuntoBurbuja;
+  Nativo.al("modo", ponerModo);
 }
 
 
@@ -2852,7 +3215,7 @@ function aplicarApariencia() {
   raiz.style.setProperty("--cian-rgb", c.rgb);
   raiz.dataset.animaciones = ajustes.animaciones || "completas";
   raiz.dataset.letra = ajustes.letra || "normal";
-  [reactorInicio, reactorLlamada].forEach((r) => { if (r && r.apariencia) r.apariencia(c.rgb, raiz.dataset.animaciones); });
+  [reactorInicio].forEach((r) => { if (r && r.apariencia) r.apariencia(c.rgb, raiz.dataset.animaciones); });
 }
 
 // ---------- Pestañas, ajustes e instalar ----------
@@ -3060,6 +3423,7 @@ window.JarvisApp = {
     if (!$("visor").hidden) { cerrarVisor(); return true; }
     if ($("ajustes").open) { $("ajustes").close(); return true; }
     if (llamada.activa) { colgar(); return true; }
+    if (burbuja.activa) { cerrarBurbuja(); return true; }
     if (vistaActual !== "inicio") { cambiarVista("inicio"); return true; }
     if (ocupado) { Voz.callar(); Oido.cancelar(); Cerebro.parar(); return true; }
     return false;
@@ -3194,10 +3558,17 @@ function conectarBotones() {
   $("foto-sacar").onclick = () => { sacarFoto(); ajustarCaja(); };
 
   document.querySelectorAll(".pestana[data-vista]").forEach((b) => { b.onclick = () => cambiarVista(b.dataset.vista); });
-  $("boton-llamar").onclick = llamar;
-  $("boton-colgar").onclick = colgar;
-  $("boton-pausa").onclick = pausar;
-  $("llamada-reactor").onclick = tocarReactor;
+  $("boton-llamar").onclick = () => llamar();
+  $("live-fin").onclick = colgar;
+  $("live-pausa").onclick = pausar;
+  $("live-centro").onclick = (e) => { if (!e.target.closest("button")) tocarReactor(); };   // tocar: interrumpe o sigue
+  $("live-subtitulos").onclick = subtitulosLive;
+  $("live-camara").onclick = () => camaraLive(!llamada.camara);
+  $("live-girar").onclick = () => { llamada.frente = !llamada.frente; camaraLive(true); };
+  $("live-pantalla").onclick = () => verPantallaLive(!llamada.viendo);
+  $("live-achicar").onclick = () => liveMini(true);
+  $("live-dejar").onclick = () => verPantallaLive(false);
+  conectarBurbuja();
   $("boton-hablar").onclick = hablarEnInicio;
   $("inicio-reactor").onclick = () => { if (ocupado) { Voz.callar(); Oido.cortar(); Cerebro.parar(); } };
   $("hud-proximo").onclick = (e) => { e.stopPropagation(); cambiarVista("dia"); };
@@ -3380,7 +3751,11 @@ function conectarBotones() {
   };
   document.addEventListener("visibilitychange", () => (document.visibilityState === "visible" ? alVolver() : alIrse()));
   // (en la app de Android, Android avisa también: el WebView no siempre cambia la visibilidad de la página)
-  Nativo.al("pausa", () => { enPausa = true; alIrse(); });
+  Nativo.al("pausa", () => {
+    enPausa = true;
+    alIrse();
+    if (burbuja.activa && !llamada.activa && !Nativo.ya("pantallaEstado").compartiendo) Voz.callar();
+  });
   Nativo.al("vuelta", () => { enPausa = false; alVolver(); });
 }
 
@@ -3426,7 +3801,6 @@ function arrancar() {
   }
   leerLink();
   reactorInicio = crearReactor($("reactor-inicio"));
-  reactorLlamada = crearReactor($("reactor"));
   conectarBotones();
   pintarProtocolos();
   if (!Nativo.hay && "serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});

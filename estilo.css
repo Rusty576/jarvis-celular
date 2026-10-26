@@ -26,7 +26,7 @@
 [hidden] { display: none !important; }
 /* como una app: lo de la interfaz no se selecciona con un toque largo (los mensajes y lo que escribís, sí) */
 body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
-.msg, input, textarea, .inicio-texto, .item .texto, .pc-detalle, .llamada-texto { -webkit-user-select: text; user-select: text; }
+.msg, input, textarea, .inicio-texto, .item .texto, .pc-detalle, .live-texto { -webkit-user-select: text; user-select: text; }
 /* lo que es solo de la app de Android, o solo de la web app */
 .solo-nativa { display: none !important; }
 .nativa .solo-nativa { display: revert !important; }
@@ -188,7 +188,7 @@ h2 { font-family: var(--titulo); font-size: 12px; font-weight: 700; letter-spaci
 .msg .archivo-adjunto { display: block; margin-top: 4px; font-size: 15px; color: var(--texto-2); }
 /* llamar a JARVIS, en la barra de la charla (al lado del micrófono) */
 .icono-boton.llamar-chat { color: var(--verde); border-color: rgba(77, 255, 184, 0.45); }
-.icono-boton.llamar-chat svg { fill: currentColor; stroke: none; width: 22px; height: 22px; }
+.icono-boton.llamar-chat svg { width: 22px; height: 22px; stroke-width: 2.2; }
 .barra .icono-boton { width: 44px; height: 44px; }
 .barra { gap: 6px; padding: 10px 10px; }
 
@@ -268,34 +268,109 @@ h2 { font-family: var(--titulo); font-size: 12px; font-weight: 700; letter-spaci
                              box-shadow: 0 0 14px rgba(var(--cian-rgb), 0.5); }
 .pestana.llamar svg { fill: currentColor; stroke: none; }
 
-/* ---------- La llamada ---------- */
-.llamada { position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column; align-items: center;
-           padding: calc(14px + var(--arriba)) 20px calc(22px + var(--abajo));
-           background: radial-gradient(circle at 50% 38%, #06263a, var(--fondo) 70%); }
-.llamada-cabeza { display: flex; flex-direction: column; align-items: center; gap: 2px; }
-.llamada-cabeza b { font-family: var(--titulo); font-weight: 900; letter-spacing: 0.35em; color: var(--cian-fuerte);
-                    text-shadow: 0 0 14px rgba(var(--cian-rgb), 0.6); }
-.llamada-cabeza span { font-family: var(--titulo); font-size: 12px; color: var(--texto-3); letter-spacing: 0.15em; }
-.llamada-reactor { flex: 1; width: 100%; min-height: 220px; position: relative; }
-.llamada-reactor canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
-.llamada-estado { font-family: var(--titulo); font-weight: 700; font-size: 15px; letter-spacing: 0.45em; padding-left: 0.45em;
-                  color: var(--cian); text-shadow: 0 0 12px rgba(var(--cian-rgb), 0.7); text-align: center; }
-.llamada-estado.pensando { color: var(--ambar); text-shadow: 0 0 12px rgba(255, 181, 71, 0.6); }
-.llamada-estado.escuchando { color: var(--verde); text-shadow: 0 0 12px rgba(77, 255, 184, 0.6); }
-.llamada-texto { min-height: 4.2em; max-height: 9em; overflow-y: auto; margin: 10px 0 6px; text-align: center; font-size: 18px;
-                 font-weight: 500; color: var(--texto-2); line-height: 1.35; width: 100%; }
-.llamada-tarjetas { width: 100%; }
-.llamada-botones { display: flex; gap: 46px; margin-top: 8px; }
-.redondo { width: 70px; height: 70px; border-radius: 50%; border: 1px solid var(--panel-borde); background: var(--panel);
-           color: var(--texto); display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; }
-.redondo span { position: absolute; top: 76px; font-size: 13px; color: var(--texto-3); white-space: nowrap; }
-.redondo svg { width: 30px; height: 30px; }
-.redondo.rojo { background: var(--rojo); border: none; color: #fff; box-shadow: 0 0 20px rgba(255, 90, 106, 0.5); }
-.redondo.rojo svg { fill: currentColor; stroke: none; }
-.redondo .mic-off { display: none; }
-.redondo.pausado { background: rgba(255, 181, 71, 0.15); border-color: var(--ambar); color: var(--ambar); }
-.redondo.pausado .mic-on { display: none; }
-.redondo.pausado .mic-off { display: block; }
+/* ---------- Live (como Gemini Live): negro, la luz abajo que late con la voz, y lo que dice en grande ---------- */
+.live { position: fixed; inset: 0; z-index: 30; display: flex; flex-direction: column; overflow: hidden; background: #000;
+        padding: calc(10px + var(--arriba)) 18px calc(20px + var(--abajo)); --nivel: 0.35; }
+.live-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; }
+.live.con-camara::before { content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none;
+                           background: linear-gradient(rgba(0, 0, 0, 0.45), transparent 22%, transparent 55%, rgba(0, 0, 0, 0.7)); }
+.live-cabeza { position: relative; z-index: 2; display: flex; align-items: center; gap: 10px; min-height: 44px; }
+.live-marca { display: inline-flex; align-items: center; gap: 9px; font-family: var(--titulo); font-weight: 700; font-size: 15px;
+              letter-spacing: 0.14em; color: #fff; }
+.live-marca i { width: 9px; height: 9px; border-radius: 50%; background: var(--cian); box-shadow: 0 0 10px var(--cian); }
+.live-tiempo { margin-left: auto; font-family: var(--titulo); font-size: 12px; letter-spacing: 0.12em; color: rgba(255, 255, 255, 0.55); }
+.live-chico { width: 42px; height: 42px; border-radius: 50%; border: none; background: rgba(255, 255, 255, 0.1); color: #fff;
+              display: grid; place-items: center; }
+.live-chico svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.live-chico:not(.activo) { color: rgba(255, 255, 255, 0.45); }
+.live-centro { position: relative; z-index: 2; flex: 1; display: flex; flex-direction: column; align-items: center;
+               justify-content: flex-end; gap: 10px; padding-bottom: 6vh; text-align: center; }
+.live-estado { font-size: 13px; font-weight: 600; letter-spacing: 0.22em; text-transform: uppercase; color: rgba(255, 255, 255, 0.6); }
+.live.pensando .live-estado { color: var(--ambar); }
+.live-texto { margin: 0; max-height: 38vh; overflow-y: auto; font-size: 25px; font-weight: 600; line-height: 1.3; color: #fff;
+              text-shadow: 0 1px 10px rgba(0, 0, 0, 0.8); -webkit-user-select: text; user-select: text; }
+.live.escuchando .live-texto { color: rgba(255, 255, 255, 0.72); }
+.live.sin-subtitulos .live-texto { visibility: hidden; }
+.live-viendo { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; }
+.live-viendo span { display: inline-flex; align-items: center; gap: 8px; font-size: 15px; color: #fff; }
+.live-viendo i { width: 9px; height: 9px; border-radius: 50%; background: var(--rojo); box-shadow: 0 0 8px var(--rojo); }
+.live-tarjetas { position: relative; z-index: 2; max-height: 34vh; overflow-y: auto; margin-bottom: 10px; }
+/* la luz: tres manchas borrosas que se mueven despacio; con la voz (la tuya o la de JARVIS) brillan más */
+.live-luz { position: absolute; left: -25%; right: -25%; bottom: -14vh; height: 48vh; z-index: 1; pointer-events: none;
+            filter: blur(46px); opacity: calc(0.5 + var(--nivel) * 0.5); transition: opacity 0.2s ease-out; }
+.live-luz i { position: absolute; bottom: 0; width: 58%; height: 100%; border-radius: 50%; animation: luz 7s ease-in-out infinite alternate; }
+.live-luz i:nth-child(1) { left: 0; background: radial-gradient(closest-side, rgba(var(--cian-rgb), 0.95), transparent); }
+.live-luz i:nth-child(2) { left: 22%; background: radial-gradient(closest-side, rgba(70, 110, 255, 0.9), transparent); animation-delay: -2.5s; }
+.live-luz i:nth-child(3) { right: 0; background: radial-gradient(closest-side, rgba(165, 95, 255, 0.75), transparent); animation-delay: -5s; }
+@keyframes luz { from { transform: translate(-4%, 10%) scale(0.95); } to { transform: translate(4%, -6%) scale(1.15); } }
+.live.pensando .live-luz i { animation-duration: 1.8s; }
+.live.libre .live-luz { opacity: 0.18; }
+.live.con-camara .live-luz { height: 30vh; opacity: calc(0.2 + var(--nivel) * 0.5); }
+.live-botones { position: relative; z-index: 2; display: flex; justify-content: center; align-items: center; gap: 16px; }
+.live-boton { width: 62px; height: 62px; border-radius: 50%; border: none; background: rgba(255, 255, 255, 0.13); color: #fff;
+              display: grid; place-items: center; position: relative; overflow: hidden; }
+.live-boton svg { width: 27px; height: 27px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.live-boton.activo { background: #fff; color: #000; }
+.live-boton.fin { width: 88px; border-radius: 31px; background: var(--rojo); }
+.live-boton.fin svg { stroke-width: 2.4; }
+.live-boton .seguir { display: none; fill: currentColor; stroke: none; }
+.live.libre #live-pausa .pausar { display: none; }
+.live.libre #live-pausa .seguir { display: block; }
+.live.libre #live-pausa { background: #fff; color: #000; }
+
+/* ---------- La ventanita (encima de otras apps, como la del asistente de Google) ---------- */
+html.modo-burbuja, html.modo-burbuja body { background: transparent !important; }
+html.modo-burbuja body > :is(#conectar, header, main, nav) { display: none !important; }
+html.modo-burbuja .cartel { bottom: calc(150px + var(--abajo)) !important; }
+.burbuja { position: fixed; inset: 0; z-index: 25; display: flex; flex-direction: column; }
+.burbuja-fuera { flex: 1; }
+.burbuja-abajo { display: flex; flex-direction: column; align-items: stretch; gap: 10px; width: 100%; max-width: 640px;
+                 margin: 0 auto; padding: 0 12px calc(12px + var(--abajo)); }
+.burbuja-hoja { display: flex; flex-direction: column; max-height: 58vh; border-radius: 26px; overflow: hidden;
+                background: rgba(8, 15, 22, 0.98); border: 1px solid rgba(var(--cian-rgb), 0.22);
+                box-shadow: 0 10px 40px rgba(0, 0, 0, 0.55); animation: subir 0.22s ease-out; }
+@keyframes subir { from { transform: translateY(14px); opacity: 0; } }
+.burbuja-cabeza { display: flex; align-items: center; gap: 6px; padding: 10px 10px 4px 18px; }
+.burbuja-cabeza b { flex: 1; font-family: var(--titulo); font-size: 12px; letter-spacing: 0.3em; color: var(--cian-fuerte); }
+.burbuja-chico { width: 38px; height: 38px; border-radius: 50%; border: none; background: rgba(255, 255, 255, 0.07);
+                 color: var(--texto-2); display: grid; place-items: center; }
+.burbuja-chico svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.burbuja-charla { overflow-y: auto; padding: 4px 14px 14px; display: flex; flex-direction: column; gap: 8px; }
+.burbuja-charla .msg { max-width: 100%; }
+.burbuja-adjunto { display: flex; align-items: center; gap: 10px; align-self: flex-start; padding: 6px 6px 6px 8px; border-radius: 16px;
+                   background: rgba(14, 22, 30, 0.97); border: 1px solid rgba(var(--cian-rgb), 0.25); color: var(--texto); }
+.burbuja-adjunto img { width: 40px; height: 40px; border-radius: 10px; object-fit: cover; }
+.burbuja-adjunto img:not([src]), .burbuja-adjunto img[src=""] { display: none; }
+.burbuja-adjunto button { width: 32px; height: 32px; border: none; border-radius: 50%; background: rgba(255, 255, 255, 0.08);
+                          color: var(--texto-2); display: grid; place-items: center; }
+.burbuja-adjunto svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
+.burbuja-chip { align-self: flex-start; display: inline-flex; align-items: center; gap: 10px; padding: 11px 18px; border-radius: 22px;
+                border: 1px solid rgba(255, 255, 255, 0.08); background: rgba(22, 24, 28, 0.97); color: #e9eef2;
+                font-family: var(--cuerpo); font-size: 17px; font-weight: 600; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45); }
+.burbuja-chip svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.burbuja-barra { position: relative; display: flex; align-items: center; gap: 4px; min-height: 64px; padding: 6px 8px; border-radius: 32px;
+                 background: rgba(22, 24, 28, 0.98); border: 1px solid rgba(255, 255, 255, 0.07); box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5); }
+/* escuchando: el borde se llena de luz que gira (como cuando Gemini te escucha) */
+.burbuja-barra::before { content: ""; position: absolute; inset: -2px; z-index: -1; border-radius: 34px; opacity: 0; transition: opacity 0.2s;
+                         background: conic-gradient(from var(--giro, 0deg), rgba(var(--cian-rgb), 1), #466eff, #a55fff, rgba(var(--cian-rgb), 1)); }
+.burbuja-barra.escuchando::before { opacity: 1; animation: girar 2.2s linear infinite; }
+@property --giro { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+@keyframes girar { to { --giro: 360deg; } }
+.burbuja-caja { flex: 1; min-width: 0; height: 48px; border: none; outline: none; background: transparent; color: #f1f5f8;
+                font-family: var(--cuerpo); font-size: 19px; padding: 0 6px; -webkit-user-select: text; user-select: text; }
+.burbuja-caja::placeholder { color: rgba(233, 238, 242, 0.62); }
+.burbuja-icono { width: 48px; height: 48px; flex: none; border-radius: 50%; border: none; background: transparent; color: #e9eef2;
+                 display: grid; place-items: center; position: relative; overflow: hidden; }
+.burbuja-icono svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.burbuja-mic { width: 52px; height: 52px; flex: none; border-radius: 50%; border: none; color: #021018; display: grid; place-items: center;
+               background: radial-gradient(circle at 50% 30%, var(--cian-fuerte), var(--cian-oscuro) 85%);
+               box-shadow: 0 0 16px rgba(var(--cian-rgb), 0.4); position: relative; overflow: hidden; }
+.burbuja-mic svg { width: 25px; height: 25px; fill: none; stroke: currentColor; stroke-width: 2.1; stroke-linecap: round; stroke-linejoin: round; }
+.burbuja-mic .si-texto { display: none; fill: currentColor; stroke: none; }
+.burbuja-barra.con-texto .burbuja-mic .si-vacio { display: none; }
+.burbuja-barra.con-texto .burbuja-mic .si-texto { display: block; }
+.burbuja-barra.escuchando .burbuja-mic { animation: latir 1.1s ease-in-out infinite; }
+@keyframes latir { 50% { transform: scale(0.9); } }
 
 /* ---------- Conectar, ajustes y avisos ---------- */
 .conectar { position: fixed; inset: 0; z-index: 30; display: flex; flex-direction: column; align-items: center; justify-content: center;

@@ -5,8 +5,9 @@ Dos formas de tener a JARVIS en el celular, con la misma pantalla:
 - **La app de Android** (`android/JARVIS.apk`, el código está en `app_android/`): una app de verdad. Escucha y
   habla con la voz del celular. Llama a tus contactos por su nombre, pone alarmas y temporizadores, prende la
   linterna, cambia el volumen y abre cualquier app. Los recordatorios suenan aunque no haya internet, y se puede
-  elegir como asistente del celular. Además: «Hey Jarvis» con la app cerrada (como «Ok Google») y un cerebro que
-  contesta sin internet (Gemma, en el mismo celular).
+  elegir como asistente del celular: se abre como la ventanita de Gemini, encima de lo que estés usando, con Live
+  y «Compartir pantalla con Live». Además: «Hey Jarvis» con la app cerrada (como «Ok Google») y un cerebro que
+  contesta sin internet (Gemma, en el mismo celular). Detalle en `app_android/LEEME.md`.
 - **La web app** (esta carpeta): se instala desde Chrome, en Android o en iPhone. Hace lo mismo menos lo del
   teléfono: para abrir otra app hay que tocar un botón.
 
@@ -19,8 +20,9 @@ Las pestañas:
   («mostrame fotos de…»), las imágenes que te hace («hacé una imagen de…»), la captura de pantalla de la PC y las
   que mandás. Tocando una se ve grande, con «Guardar», «Compartir», «De dónde es» u «Otra versión» (deslizá para
   pasar a la siguiente). Acá también llegan los avisos de JARVIS: el buen día, lo de la noche, los cuidados y lo
-  que contesta la PC. Al lado de mandar está **Llamar** (el teléfono): manos libres, te escucha, piensa y te
-  contesta hablando, hasta que digas «chau».
+  que contesta la PC. Al lado de mandar está **Live** (las ondas), como Gemini Live: manos libres, te escucha,
+  piensa y te contesta hablando, hasta que digas «chau» o toques terminar. Con la cámara le mostrás algo; en la app
+  de Android también puede ver la pantalla mientras usás otras apps.
 - **Mi día**: el clima, tus recordatorios y tus pendientes.
 - **Mails**: los no leídos; te los lee, los resume o los contesta (mandar siempre con tu OK).
 
@@ -67,9 +69,9 @@ Para actualizarla: cuando hay una versión nueva, la app te lo avisa con un bot�
 
 | Archivo | Qué es |
 |---|---|
-| `index.html` | La página: las pestañas, la pantalla de la llamada y los ajustes |
+| `index.html` | La página: las pestañas, Live, la ventanita y los ajustes |
 | `estilo.css` | Los colores y las letras de JARVIS |
-| `app.js` | Todo lo que hace: hablar con el bot, la voz, el teléfono, la llamada, Mi día y los mails |
+| `app.js` | Todo lo que hace: hablar con el bot, la voz, el teléfono, Live, la ventanita, Mi día y los mails |
 | `reactor.js` | El reactor animado |
 | `sw.js` | Guarda la web app en el celular para que abra al toque |
 | `manifest.webmanifest` | El nombre, el ícono y los colores de la web app instalada |
