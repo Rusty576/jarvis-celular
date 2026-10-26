@@ -15,7 +15,7 @@
 // ============================================================
 "use strict";
 
-const VERSION_APP = "2026.10.25.5";
+const VERSION_APP = "2026.10.25.6";
 const ANDROID_WEB = "https://rusty576.github.io/jarvis-celular/android/";   // el APK y su version.json
 const $ = (id) => document.getElementById(id);
 const Reco = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -2314,8 +2314,9 @@ async function activarEscuchaFondo(si, callado) {
       "error:microfono": `Para escucharte, dale permiso al micrófono (${DONDE_PERMISOS}).`,
       "error:android": "Android no dejó prender la escucha. En Ajustes del celular › Apps › JARVIS › Permisos, fijate que "
         + "el micrófono diga «Permitir mientras la app está en uso», y probá de nuevo.",
-      "error:detector": "No pude cargar el detector de «Hey Jarvis» en este celular. Igual podés tocar HABLAR.",
-    }[r.arranque] || "No pude prender la escucha. Probá de nuevo en un momento.", 9);
+      "error:detector": "No pude cargar el detector de «Hey Jarvis» en este celular. Igual podés tocar HABLAR."
+        + (r.detalle ? ` (El error: ${r.detalle})` : ""),
+    }[r.arranque] || "No pude prender la escucha. Probá de nuevo en un momento.", r.detalle ? 20 : 9);
   } else if (r.arranque === "ocupado") {
     avisar("Quedó prendido, pero otra app está usando el micrófono: te escucha apenas lo suelte.", 7);
   } else if (!r.sobreApps) {
