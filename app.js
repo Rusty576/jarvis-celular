@@ -15,7 +15,7 @@
 // ============================================================
 "use strict";
 
-const VERSION_APP = "2026.10.25.7";
+const VERSION_APP = "2026.10.26.1";
 const ANDROID_WEB = "https://rusty576.github.io/jarvis-celular/android/";   // el APK y su version.json
 const $ = (id) => document.getElementById(id);
 const Reco = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -1118,13 +1118,17 @@ function moverVisor(paso) {
 async function hacerAcciones(acciones) {
   // Lo que pidió el bot: en Android se hace ya; en la web, solo si recién tocaste algo (si no, queda el botón).
   // (Un documento o una imagen: solo el botón.) Devuelve el problema, si hubo (por ejemplo, un contacto que no está)
-  acciones = (acciones || []).filter((a) => a.tipo !== "abrir_url" && a.tipo !== "imagen");
-  if (!acciones.length) return null;
+  let problema = null;
+  for (const a of (acciones || []).filter((x) => x.tipo === "a_la_pc")) {   // (lo que mandaste desde acá, a la PC)
+    const r = await ultimoALaPc(a.texto);
+    if (!r.ok && r.texto) problema = r.texto;
+  }
+  acciones = (acciones || []).filter((a) => !["abrir_url", "imagen", "a_la_pc"].includes(a.tipo));
+  if (!acciones.length) return problema;
   if (!Nativo.hay) {
     if (Date.now() - ultimoToque < 4500) abrirUrl(accionAUrl(acciones[0]).url);
-    return null;
+    return problema;
   }
-  let problema = null;
   for (const a of acciones) {
     const r = await hacerEnElTelefono(a);
     if (!r.ok && r.texto) problema = r.texto;
@@ -1134,7 +1138,7 @@ async function hacerAcciones(acciones) {
 
 function pintarAcciones(contenedor, acciones) {
   contenedor.innerHTML = "";
-  (acciones || []).filter((a) => a.tipo !== "imagen").forEach((a) => {   // (las imágenes van en la galería)
+  (acciones || []).filter((a) => a.tipo !== "imagen" && a.tipo !== "a_la_pc").forEach((a) => {   // (las imágenes van en la galería)
     const boton = document.createElement("button");
     boton.className = "accion";
     if (a.tipo === "abrir_url") {   // un documento que hizo JARVIS
@@ -1355,8 +1359,9 @@ const Cerebro = {
     this.alPedazo = alPedazo;
     this.alReinicio = alReinicio || null;
     try {
+      // (como mucho unas 300 palabras: contesta corto, y así termina antes)
       return await Nativo.cuando("cerebroPreguntar", this.modelo(), sistemaDelCelular(), claveDelCelular(),
-                                 JSON.stringify(historiaDelCelular()), texto, 400);
+                                 JSON.stringify(historiaDelCelular()), texto, 300);
     } finally {
       this.alPedazo = this.alReinicio = null;
     }
@@ -1415,7 +1420,8 @@ function sistemaDelCelular() {
     `Hoy es ${DIAS[ahora.getDay()]} ${ahora.getDate()} de ${MESES[ahora.getMonth()]} de ${ahora.getFullYear()}. `
       + `Cuando empezó esta charla eran las ${horaLinda(ahora)}.`,
   ];
-  const recuerdos = (d.recuerdos || []).slice(-40);
+  // (los 25 más nuevos: con menos que leer, el celular empieza a contestar antes)
+  const recuerdos = (d.recuerdos || []).slice(-25);
   if (recuerdos.length) lineas.push("", "Lo que sabés del usuario:", ...recuerdos.map((r) => "- " + r));
   const pendientes = d.pendientes || [];
   lineas.push("Sus pendientes: " + (pendientes.length ? pendientes.map((p) => p.texto.replace(/ ⏳$/, "")
@@ -1632,7 +1638,7 @@ function pintarMensaje(m, indice) {
     const quien = document.createElement("span");
     quien.className = "quien";
     quien.textContent = m.quien === "vos" ? "VOS" : m.local ? "JARVIS · SIN INTERNET"
-      : m.aviso ? "🔔 JARVIS · " + (ETIQUETA_AVISO[m.aviso] || "AVISO") : "JARVIS";
+      : m.aviso ? "🔔 JARVIS · " + (ETIQUETA_AVISO[m.aviso] || "AVISO") : m.ia ? "JARVIS · CON " + m.ia.toUpperCase() : "JARVIS";
     if (m.en) {
       const hora = document.createElement("time");
       hora.textContent = horaLinda(new Date(m.en));
@@ -1736,7 +1742,7 @@ function pintarCharla() {
   lista.innerHTML = "";
   if (!mensajes.length) {
     lista.appendChild(pintarMensaje({quien: "jarvis", texto: "Hola, soy JARVIS. Escribime, tocá el micrófono para "
-      + "hablarme, o tocá Llamar para charlar con manos libres."}, -1));
+      + "hablarme, o tocá Live (las ondas) para charlar con manos libres."}, -1));
   }
   desdeVisible = Math.max(0, mensajes.length - VISIBLES);
   if (desdeVisible) lista.appendChild(botonAnteriores());
@@ -1831,6 +1837,13 @@ async function mandar(texto, opciones = {}) {
   // Devuelve siempre {texto, tarjetas, acciones}: si falló, texto es el motivo de verdad (y error: true)
   let foto = opciones.foto || null, contexto = "";
   const archivo = opciones.archivo || null;
+  if (foto || archivo) ultimoAdjunto = {adjunto: foto || archivo, en: Date.now()};
+  if ((foto || archivo) && tienePc() && RE_A_LA_PC.test(normalizar(texto))) return mandarALaPc(foto || archivo, texto);
+  if (archivo && archivo.grande) {   // (más de 15 MB: JARVIS no lo puede leer, pero sí pasárselo a la PC)
+    const aviso = `«${archivo.nombre}» es muy grande para que lo lea (hasta 15 MB). Se lo puedo pasar a la PC: decí «a la PC».`;
+    agregar({quien: "aviso", texto: aviso});
+    return {texto: aviso, tarjetas: [], acciones: [], error: true};
+  }
   const mio = agregar({quien: "vos", texto: texto || (opciones.audio ? "🎙️ ..." : ""), imagen: foto ? foto.miniatura : null,
                        archivo: archivo ? archivo.nombre : null});
   // un archivo de texto, sin internet: lo lee el cerebro del celular
@@ -1889,12 +1902,16 @@ async function mandar(texto, opciones = {}) {
     return {texto: aviso, tarjetas: [], acciones: [], error: true, enCola: soloTexto};
   }
   pensando(true);
+  // si el bot tarda (Gemini sin cupo o lento), el cerebro del celular se va cargando: si hace falta, contesta enseguida
+  const conCerebro = soloTexto && Nativo.hay && Cerebro.listo();
+  const precalentar = conCerebro ? setTimeout(() => Cerebro.preparar(), 12000) : null;
   try {
     const r = await api("app_mensaje", {texto: (contexto && texto ? contexto + " " : "") + (texto || ""),
                                          llamada: !!opciones.llamada, audio: opciones.audio || null,
                                          imagen: foto ? {mime: "image/jpeg", datos: foto.datos} : null,
                                          archivo: archivo ? {mime: archivo.mime, datos: archivo.datos, nombre: archivo.nombre} : null},
-                        archivo ? 180 : 100);
+                        archivo ? 180 : conCerebro ? 85 : 100);
+    clearTimeout(precalentar);
     if (r.pedido && !texto) {   // lo que entendió de la grabación, o lo que se preguntó de la foto
       mio.texto = (opciones.audio ? "🎙️ " : "") + r.pedido;
       guardar("mensajes", mensajes);
@@ -1911,7 +1928,7 @@ async function mandar(texto, opciones = {}) {
     const imagenes = await prepararImagenes(acciones);   // (las imágenes que hizo o encontró JARVIS)
     pensando(false);
     agregar({quien: "jarvis", texto: respuesta, tarjetas: r.tarjetas || [], acciones: acciones,
-             imagenes: imagenes.length ? imagenes : undefined});
+             imagenes: imagenes.length ? imagenes : undefined, ia: r.ia || undefined});
     const problema = await hacerAcciones(acciones);   // abrir la app, llamar, la alarma...
     if (problema) {
       agregar({quien: "aviso", texto: problema});
@@ -1926,6 +1943,7 @@ async function mandar(texto, opciones = {}) {
     return {texto: respuesta, tarjetas: r.tarjetas || [], acciones: acciones, pedido: r.pedido, callado: callado,
             imagenes: imagenes};
   } catch (e) {
+    clearTimeout(precalentar);
     pensando(false);
     if (soloTexto && ["sin_red", "servidor", "http", "no_json", "tiempo"].includes(e.tipo)) {
       // se cortó internet, o Google no contesta: contesta el celular (si tiene el cerebro bajado)
@@ -2069,9 +2087,16 @@ function tamanoLindo(bytes) {
 }
 
 async function prepararAdjunto(archivo) {
-  // Una foto se achica (como mucho 1280 de lado); lo demás (PDF, audio, video, texto) va tal cual, hasta 15 MB
-  if (/^image\/(jpeg|png|webp|heic|heif)$/.test(archivo.type)) return Object.assign({tipo: "foto"}, await prepararFoto(archivo));
-  if (archivo.size > MAX_ARCHIVO) throw new Error(`Es muy grande (${tamanoLindo(archivo.size)}): hasta 15 MB.`);
+  // Una foto se achica (como mucho 1280 de lado); lo demás (PDF, audio, video, texto) va tal cual, hasta 15 MB. Lo más
+  // grande no lo puede leer JARVIS, pero sí pasárselo a la PC (por eso queda también el archivo tal cual: original)
+  const original = {archivo: archivo, nombre: archivo.name || "archivo", mime: archivo.type || "application/octet-stream",
+                    tam: archivo.size};
+  if (/^image\/(jpeg|png|webp|heic|heif)$/.test(archivo.type)) {
+    return Object.assign({tipo: "foto", original: original}, await prepararFoto(archivo));
+  }
+  if (archivo.size > MAX_ARCHIVO) {
+    return {tipo: "archivo", grande: true, mime: original.mime, nombre: original.nombre, tam: archivo.size, original: original};
+  }
   const datos = await new Promise((listo, error) => {
     const lector = new FileReader();
     lector.onload = () => listo(String(lector.result).split(",")[1] || "");
@@ -2080,7 +2105,7 @@ async function prepararAdjunto(archivo) {
   });
   const mime = archivo.type || ({txt: "text/plain", md: "text/markdown", csv: "text/csv", json: "application/json"}
     [(archivo.name.split(".").pop() || "").toLowerCase()] || "application/octet-stream");
-  return {tipo: "archivo", mime: mime, datos: datos, nombre: archivo.name || "archivo", tam: archivo.size};
+  return {tipo: "archivo", mime: mime, datos: datos, nombre: archivo.name || "archivo", tam: archivo.size, original: original};
 }
 
 function leerTexto(archivo) {
@@ -2099,10 +2124,13 @@ function mostrarAdjunto(adjunto) {
   const esFoto = adjunto.tipo === "foto";
   $("foto-miniatura").hidden = !esFoto;
   if (esFoto) $("foto-miniatura").src = adjunto.miniatura;
-  $("adjunto-texto").textContent = esFoto ? "Foto lista para mandar" : `📄 ${adjunto.nombre} (${tamanoLindo(adjunto.tam)})`;
+  $("adjunto-texto").textContent = esFoto ? "Foto lista para mandar" : `📄 ${adjunto.nombre} (${tamanoLindo(adjunto.tam)})`
+    + (adjunto.grande ? ": muy grande para leerlo, pero se lo paso a la PC" : "");
   $("foto-lista").hidden = false;
+  $("adjunto-pc").hidden = !tienePc();
   ajustarCaja();
-  $("caja").placeholder = esFoto ? "¿Qué querés saber de la foto? (o mandala así)" : "¿Qué hago con el archivo? (o mandalo así)";
+  $("caja").placeholder = adjunto.grande ? "Tocá «A la PC»"
+    : esFoto ? "¿Qué querés saber de la foto? (o mandala así)" : "¿Qué hago con el archivo? (o mandalo así)";
 }
 
 async function dictar() {
@@ -2151,11 +2179,227 @@ async function prepararFoto(archivo) {
   return {datos: grande.split(",")[1], miniatura: dibujar(220, 0.6)};
 }
 
+async function adjuntoALaPc() {
+  // el botón «A la PC» del adjunto: se lo pasa a la PC tal cual (con lo que hayas escrito, como nota)
+  if (!adjuntoListo) return;
+  const adjunto = adjuntoListo, texto = $("caja").value.trim();
+  $("caja").value = "";
+  sacarFoto();
+  ajustarCaja();
+  ultimoAdjunto = {adjunto: adjunto, en: Date.now()};
+  await mandarALaPc(adjunto, texto);
+}
+
 function sacarFoto() {
   adjuntoListo = null;
   $("foto-lista").hidden = true;
   $("archivo").value = "";
   $("caja").placeholder = "Escribile a JARVIS...";
+}
+
+
+// ---------- Pasarle archivos a la PC (fotos, videos, documentos, de cualquier tamaño) ----------
+// Pasan por el Google Drive del usuario: los chicos van enteros al bot; los grandes se suben directo a Drive, de a
+// pedazos de 4 MB (con la app de Android; en la web, si el navegador deja). La PC los baja a Documentos › Del celular.
+
+const RE_A_LA_PC = /^(a|para|en) (la |mi )?(pc|compu|computadora)$|\b(mand|pas|envi|guard|sub|llev|tir|dej|copi|pon)\w*\b.*\b(a|en|para|hacia) (la |mi )?(pc|compu|computadora|notebook|laptop)\b/;
+const PEDAZO_SUBIDA = 4 * 1024 * 1024;   // (Drive pide pedazos de a 256 KB justos)
+let ultimoAdjunto = null;   // lo último que mandaste ({adjunto, en}): si después decís «pasáselo a la PC», va esto
+
+function base64De(blob) {
+  return new Promise((listo, error) => {
+    const lector = new FileReader();
+    lector.onload = () => listo(String(lector.result).split(",")[1] || "");
+    lector.onerror = () => error(new Error("No pude leer el archivo."));
+    lector.readAsDataURL(blob);
+  });
+}
+
+async function subirPedazo(url, desde, hasta, total, origen, mime) {
+  // Un pedazo [desde, hasta) a la subida de Drive. origen: un archivo elegido acá (File), {ref} (uno compartido desde
+  // otra app: lo lee Android) o null (solo preguntar cuánto llegó). Devuelve {id} al final, o {llego}: hasta dónde
+  if (Nativo.hay) {
+    const datos = origen instanceof Blob ? await base64De(origen.slice(desde, hasta)) : "";
+    const r = await Nativo.cuando("subirPedazo", url, desde, hasta, total, datos, origen && origen.ref ? origen.ref : "",
+                                  mime, 180);
+    if (r.estado === 200 || r.estado === 201) return {id: JSON.parse(r.cuerpo).id};
+    if (r.estado === 308) return {llego: r.rango ? Number(String(r.rango).split("-")[1]) + 1 : 0};
+    throw errorDeRed(r.error || "http", r.estado);
+  }
+  const r = await fetch(url, {method: "PUT", body: origen ? origen.slice(desde, hasta) : null,
+                              headers: {"Content-Range": origen ? `bytes ${desde}-${hasta - 1}/${total}` : `bytes */${total}`}});
+  if (r.ok) return {id: (await r.json()).id};
+  if (r.status === 308) {
+    const rango = r.headers.get("Range");
+    return {llego: rango ? Number(rango.split("-")[1]) + 1 : 0};
+  }
+  throw errorDeRed("http", r.status);
+}
+
+async function mandarALaPc(adjunto, texto, opciones = {}) {
+  // opciones.yaEnLaCharla: el pedido ya se ve (lo pidió JARVIS, después de mandarle el archivo)
+  // el archivo tal cual (la foto sin achicar); si Android no dijo cuánto pesa, va lo que ya tiene la página
+  const o = adjunto.original;
+  const original = o && (o.archivo || o.tam > 0) ? o : null;
+  const nombre = (original && original.nombre) || adjunto.nombre || "Foto.jpg";
+  const mime = (original && original.mime) || adjunto.mime || "image/jpeg";
+  const tam = (original && original.tam) || adjunto.tam || Math.floor(String(adjunto.datos || "").length * 3 / 4);
+  if (!opciones.yaEnLaCharla) {
+    agregar({quien: "vos", texto: texto || "🖥️ A la PC", imagen: adjunto.miniatura || null,
+             archivo: adjunto.tipo === "foto" ? null : nombre});
+  }
+  if (!hayInternet()) {
+    const aviso = "No hay internet: no pude pasarle «" + nombre + "» a la PC. Probá cuando vuelva.";
+    agregar({quien: "aviso", texto: "⏳ " + aviso});
+    return {texto: aviso, tarjetas: [], acciones: [], error: true};
+  }
+  const progreso = agregar({quien: "aviso", texto: "📤 Subiendo «" + nombre + "» para la PC..."});
+  const verProgreso = (n) => {
+    progreso.texto = `📤 Subiendo «${nombre}» para la PC... ${Math.min(99, Math.round(n * 100 / tam))}%`;
+    redibujar(progreso);
+  };
+  const sacarProgreso = () => {
+    const i = mensajes.indexOf(progreso);
+    if (i >= 0) mensajes.splice(i, 1);
+    const div = divDe.get(progreso);
+    if (div) div.remove();
+    guardarCharla();
+  };
+  try {
+    let r;
+    const origen = original ? (original.archivo || (original.ref ? {ref: original.ref} : null)) : null;
+    if (!origen || tam <= PEDAZO_SUBIDA) {   // chico: entero, al bot
+      const datos = origen instanceof Blob ? await base64De(origen) : adjunto.datos;
+      if (!datos) throw new ErrorJarvis("bot", "No tengo el archivo: mandámelo de nuevo.");
+      r = await api("app_a_la_pc", {archivo: {mime: mime, datos: datos, nombre: nombre}, texto: texto || ""}, 180);
+    } else {   // grande: directo a Drive, de a pedazos (si se corta un pedazo, pregunta cuánto llegó y sigue)
+      const subida = await api("app_subida_pc", {nombre: nombre, mime: mime, tam: tam}, 60);
+      if (!subida.ok) throw new ErrorJarvis("bot", subida.error || "No pude empezar la subida.");
+      let desde = 0, id = null, fallos = 0;
+      while (!id) {
+        try {
+          const p = await subirPedazo(subida.url, desde, Math.min(tam, desde + PEDAZO_SUBIDA), tam, origen, mime);
+          if (p.id) id = p.id;
+          else desde = p.llego !== undefined ? p.llego : Math.min(tam, desde + PEDAZO_SUBIDA);
+          fallos = 0;
+          verProgreso(desde);
+        } catch (e) {
+          if (++fallos > 4) throw e;
+          await esperar(1500 * fallos);
+          try {
+            const p = await subirPedazo(subida.url, 0, 0, tam, null, mime);
+            if (p.id) id = p.id;
+            else desde = p.llego || 0;
+          } catch (e2) { /* sigue intentando con el mismo pedazo */ }
+        }
+      }
+      r = await api("app_subida_lista", {id: id, texto: texto || ""}, 60);
+    }
+    sacarProgreso();
+    if (!r.ok) throw new ErrorJarvis("bot", r.error || "No pude pasárselo a la PC.");
+    const respuesta = (r.mensajes || []).join("\n\n") || "Listo: va para la PC.";
+    agregar({quien: "jarvis", texto: respuesta});
+    return {texto: respuesta, tarjetas: [], acciones: []};
+  } catch (e) {
+    sacarProgreso();
+    const aviso = "No pude pasarle «" + nombre + "» a la PC: " + e.message;
+    agregar({quien: "aviso", texto: aviso});
+    return {texto: aviso, tarjetas: [], acciones: [], error: true};
+  }
+}
+
+function ultimoALaPc(texto) {
+  // JARVIS pidió pasarle a la PC lo último que mandaste desde acá (la app todavía lo tiene)
+  if (!ultimoAdjunto || Date.now() - ultimoAdjunto.en > 30 * 60000) {
+    return Promise.resolve({ok: false, texto: "Ya no tengo el archivo: mandámelo de nuevo diciendo «a la PC»."});
+  }
+  return mandarALaPc(ultimoAdjunto.adjunto, texto, {yaEnLaCharla: true}).then((r) => ({ok: !r.error}));
+}
+
+
+// ---------- Las IAs de repuesto (Ajustes): cuando Gemini no tiene cupo o anda lento ----------
+
+const PAGINAS_IAS = {groq: "https://console.groq.com/keys", cerebras: "https://cloud.cerebras.ai",
+                     mistral: "https://console.mistral.ai/api-keys", openrouter: "https://openrouter.ai/keys"};
+
+function pintarIas(r) {
+  const caja = $("ias-lista");
+  caja.innerHTML = "";
+  $("ias-gemini").textContent = !r ? "" : r.gemini === "bien" ? "Gemini anda bien ahora."
+    : r.gemini === "sin cupo" ? "Gemini se quedó sin cupo por hoy: contestan las de repuesto."
+    : "Gemini anduvo lento o falló hace un rato: por unos minutos contestan primero las de repuesto.";
+  ((r && r.ias) || []).forEach((ia) => {
+    const fila = document.createElement("div");
+    fila.className = "ia";
+    const cabeza = document.createElement("div");
+    cabeza.className = "ia-cabeza";
+    const nombre = document.createElement("b");
+    nombre.textContent = ia.nombre;
+    const estado = document.createElement("span");
+    estado.className = "ia-estado" + (ia.tiene && !ia.mala ? " lista" : "");
+    estado.textContent = !ia.tiene ? "Sin clave" : ia.mala ? "La clave no anda"
+      : ia.descansa ? "Lista (descansando un rato: usó su cupo)" : "Lista" + (ia.modelo ? " · " + ia.modelo : "");
+    cabeza.append(nombre, estado);
+    const entrada = document.createElement("input");
+    entrada.type = "password";
+    entrada.autocomplete = "off";
+    entrada.placeholder = ia.tiene ? "Otra clave (para cambiarla)" : "Pegá la clave";
+    const guardar = document.createElement("button");
+    guardar.type = "button";
+    guardar.className = "boton principal";
+    guardar.textContent = "Guardar";
+    const sacarla = document.createElement("button");
+    sacarla.type = "button";
+    sacarla.className = "boton peligro";
+    sacarla.textContent = "Quitar";
+    sacarla.hidden = !ia.tiene;
+    const pagina = document.createElement("button");
+    pagina.type = "button";
+    pagina.className = "boton";
+    pagina.textContent = "Conseguir una clave gratis";
+    pagina.onclick = () => abrirUrl(PAGINAS_IAS[ia.id] || "https://" + ia.donde);
+    const cambiar = async (clave) => {
+      guardar.disabled = sacarla.disabled = true;
+      estado.textContent = clave ? "Probando la clave..." : "Quitándola...";
+      try {
+        const nuevo = await api("app_ias", {ia: ia.id, clave: clave}, 60);
+        if (!nuevo.ok) throw new Error(nuevo.error || "No pude.");
+        pintarIas(nuevo);
+        if (clave) avisar("Listo: " + ia.nombre + " queda de repuesto.", 4);
+      } catch (e) {
+        guardar.disabled = sacarla.disabled = false;
+        estado.textContent = e.message;
+      }
+    };
+    guardar.onclick = () => {
+      const clave = entrada.value.trim();
+      if (!clave) return entrada.focus();
+      entrada.value = "";
+      cambiar(clave);
+    };
+    sacarla.onclick = () => { if (confirm("¿Quito la clave de " + ia.nombre + "?")) cambiar(""); };
+    const fila1 = document.createElement("div");
+    fila1.className = "ia-fila";
+    fila1.append(entrada, guardar);
+    const fila2 = document.createElement("div");
+    fila2.className = "hoja-fila";
+    fila2.append(pagina, sacarla);
+    fila.append(cabeza, fila1, fila2);
+    caja.appendChild(fila);
+  });
+}
+
+async function verIas() {
+  $("ias-gemini").textContent = "Mirando...";
+  try {
+    const r = await api("app_ias", {}, 40);
+    if (!r.ok) throw new Error(r.error || "");
+    pintarIas(r);
+  } catch (e) {
+    $("ias-gemini").textContent = e.message === "acción desconocida"
+      ? "Hace falta el bot actualizado: decile a JARVIS en la PC «actualizá el bot del celular»."
+      : "No pude ver las IAs de repuesto ahora (" + e.message + ").";
+  }
 }
 
 
@@ -3285,6 +3529,7 @@ function abrirAjustes() {
   $("ajuste-sensibilidad").value = ajustes.sensibilidad || "normal";
   $("ajuste-pantalla-apagada").checked = ajustes.pantallaApagada !== false;
   $("ajustes-nativos").hidden = !Nativo.hay;
+  if ($("grupo-ias").open) verIas();
   if (Nativo.hay) {   // el cerebro sin internet: cómo va la bajada, mientras están abiertos los ajustes
     const e = Nativo.ya("escuchaEstado");   // (el botón de la batería, solo si hace falta)
     $("ajuste-bateria").hidden = e.sinAhorro !== false || !window.JarvisNativo.pedirSinAhorro;
@@ -3463,14 +3708,18 @@ function escucharEventosNativos() {
       $("caja").value = d.texto;
       ajustarCaja();
     }
+    const original = d.ref ? {ref: d.ref, nombre: d.nombre, mime: d.mime, tam: d.tam} : null;   // (tal cual: para la PC)
     if (d.imagen) {
       try {
-        mostrarAdjunto(Object.assign({tipo: "foto"}, await prepararFoto(await (await fetch(d.imagen)).blob())));
+        mostrarAdjunto(Object.assign({tipo: "foto", original: original}, await prepararFoto(await (await fetch(d.imagen)).blob())));
       } catch (e) {
         avisar("No pude abrir esa foto.");
       }
     }
-    if (d.archivo) mostrarAdjunto(Object.assign({tipo: "archivo"}, d.archivo));
+    if (d.archivo) mostrarAdjunto(Object.assign({tipo: "archivo", original: original}, d.archivo));
+    if (d.grande) {
+      mostrarAdjunto({tipo: "archivo", grande: true, nombre: d.nombre, mime: d.mime, tam: d.tam, original: original});
+    }
     if (d.error) avisar(d.error, 5);
     $("caja").focus();
   });
@@ -3556,6 +3805,8 @@ function conectarBotones() {
     }
   };
   $("foto-sacar").onclick = () => { sacarFoto(); ajustarCaja(); };
+  $("adjunto-pc").onclick = adjuntoALaPc;
+  $("grupo-ias").addEventListener("toggle", () => { if ($("grupo-ias").open) verIas(); });
 
   document.querySelectorAll(".pestana[data-vista]").forEach((b) => { b.onclick = () => cambiarVista(b.dataset.vista); });
   $("boton-llamar").onclick = () => llamar();

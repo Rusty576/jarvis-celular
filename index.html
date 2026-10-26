@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#02070d">
   <!-- Seguridad: solo corre lo de la app y solo habla con Google (el bot). Aunque algo raro se colara en un mensaje, no
        podría correr código ni mandar tus datos a otro lado. (file: es la app de Android, que trae la página adentro) -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self' file:; script-src 'self' file:; style-src 'self' file: 'unsafe-inline'; img-src 'self' file: data: blob:; font-src 'self' file:; media-src 'self' file: data: blob:; connect-src 'self' https://script.google.com https://script.googleusercontent.com data: blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' file:; script-src 'self' file:; style-src 'self' file: 'unsafe-inline'; img-src 'self' file: data: blob:; font-src 'self' file:; media-src 'self' file: data: blob:; connect-src 'self' https://script.google.com https://script.googleusercontent.com https://www.googleapis.com data: blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -89,6 +89,7 @@
     <div id="foto-lista" class="foto-lista" hidden>
       <img id="foto-miniatura" alt="">
       <span id="adjunto-texto">Foto lista para mandar</span>
+      <button type="button" id="adjunto-pc" class="boton chico adjunto-pc" hidden>🖥️ A la PC</button>
       <button id="foto-sacar" class="icono-boton chico" aria-label="Sacar la foto">
         <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
       </button>
@@ -299,6 +300,16 @@
           <option value="spotify">Spotify</option>
         </select>
       </label>
+    </details>
+
+    <details class="grupo" id="grupo-ias">
+      <summary>IAs de repuesto</summary>
+      <p class="ayuda">Si Gemini se queda sin cupo o anda lento, JARVIS contesta con otra IA gratis (tarda uno o dos
+        segundos). Conseguí una clave gratis en su página, pegala acá y listo: con una alcanza (Groq es la más rápida). Ven
+        la charla y tus recuerdos, como Gemini; las fotos y los videos, solo Gemini. (Las versiones gratis de Mistral y
+        OpenRouter pueden usar lo que les mandás para entrenar.)</p>
+      <p class="ayuda" id="ias-gemini"></p>
+      <div id="ias-lista" class="ias-lista"></div>
     </details>
 
     <details class="grupo">

@@ -23,6 +23,8 @@ Las pestañas:
   que contesta la PC. Al lado de mandar está **Live** (las ondas), como Gemini Live: manos libres, te escucha,
   piensa y te contesta hablando, hasta que digas «chau» o toques terminar. Con la cámara le mostrás algo; en la app
   de Android también puede ver la pantalla mientras usás otras apps.
+  Al adjuntar algo aparece **«🖥️ A la PC»**: se lo pasa a JARVIS en la PC (cualquier archivo, hasta 2 GB; queda en
+  Documentos › Del celular).
 - **Mi día**: el clima, tus recordatorios y tus pendientes.
 - **Mails**: los no leídos; te los lee, los resume o los contesta (mandar siempre con tu OK).
 
@@ -40,6 +42,8 @@ Están agrupados (tocá cada grupo para abrirlo):
 
 - **Voz**: cuándo lee las respuestas en voz alta, qué voz, la velocidad y el tono.
 - **Respuestas**: cómo te llama, si contesta corto o largo, y la app de música.
+- **IAs de repuesto**: otra IA gratis (Groq, Cerebras, Mistral u OpenRouter) para cuando Gemini no tiene cupo o anda
+  lento. Pegás la clave y listo.
 - **Avisos**: dónde llegan (en la app, en Telegram o en los dos), la hora del buen día (o nunca), lo de la noche,
   los cuidados y (en la app de Android) los recordatorios en el celular. Lo que dice «del bot» vale también para Telegram (si el bot es
   viejo, aparece apagado hasta que lo actualices).
