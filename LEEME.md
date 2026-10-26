@@ -42,8 +42,8 @@ Están agrupados (tocá cada grupo para abrirlo):
 
 - **Voz**: cuándo lee las respuestas en voz alta, qué voz, la velocidad y el tono.
 - **Respuestas**: cómo te llama, si contesta corto o largo, y la app de música.
-- **IAs de repuesto**: otra IA gratis (Groq, Cerebras, Mistral u OpenRouter) para cuando Gemini no tiene cupo o anda
-  lento. Pegás la clave y listo.
+- **IAs de repuesto**: otra IA gratis, sin tarjeta, para cuando Gemini no tiene cupo o anda lento. Gemma ya anda sola
+  (usa tu clave de Gemini); Groq, Mistral u OpenRouter, pegando su clave gratis.
 - **Avisos**: dónde llegan (en la app, en Telegram o en los dos), la hora del buen día (o nunca), lo de la noche,
   los cuidados y (en la app de Android) los recordatorios en el celular. Lo que dice «del bot» vale también para Telegram (si el bot es
   viejo, aparece apagado hasta que lo actualices).

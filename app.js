@@ -15,7 +15,7 @@
 // ============================================================
 "use strict";
 
-const VERSION_APP = "2026.10.26.1";
+const VERSION_APP = "2026.10.26.2";
 const ANDROID_WEB = "https://rusty576.github.io/jarvis-celular/android/";   // el APK y su version.json
 const $ = (id) => document.getElementById(id);
 const Reco = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -2319,8 +2319,8 @@ function ultimoALaPc(texto) {
 
 // ---------- Las IAs de repuesto (Ajustes): cuando Gemini no tiene cupo o anda lento ----------
 
-const PAGINAS_IAS = {groq: "https://console.groq.com/keys", cerebras: "https://cloud.cerebras.ai",
-                     mistral: "https://console.mistral.ai/api-keys", openrouter: "https://openrouter.ai/keys"};
+const PAGINAS_IAS = {groq: "https://console.groq.com/keys", mistral: "https://console.mistral.ai/api-keys",
+                     openrouter: "https://openrouter.ai/keys"};
 
 function pintarIas(r) {
   const caja = $("ias-lista");
@@ -2340,6 +2340,14 @@ function pintarIas(r) {
     estado.textContent = !ia.tiene ? "Sin clave" : ia.mala ? "La clave no anda"
       : ia.descansa ? "Lista (descansando un rato: usó su cupo)" : "Lista" + (ia.modelo ? " · " + ia.modelo : "");
     cabeza.append(nombre, estado);
+    const nota = document.createElement("p");   // (que es gratis, y con qué condiciones)
+    nota.className = "ia-nota";
+    nota.textContent = ia.nota || "Gratis.";
+    if (ia.sinClave) {   // Gemma: con la misma clave de Gemini, sin hacer nada
+      fila.append(cabeza, nota);
+      caja.appendChild(fila);
+      return;
+    }
     const entrada = document.createElement("input");
     entrada.type = "password";
     entrada.autocomplete = "off";
@@ -2384,7 +2392,7 @@ function pintarIas(r) {
     const fila2 = document.createElement("div");
     fila2.className = "hoja-fila";
     fila2.append(pagina, sacarla);
-    fila.append(cabeza, fila1, fila2);
+    fila.append(cabeza, nota, fila1, fila2);
     caja.appendChild(fila);
   });
 }

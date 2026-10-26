@@ -379,6 +379,7 @@ html.modo-burbuja .cartel { bottom: calc(150px + var(--abajo)) !important; }
 .ia-estado { font-size: 0.85em; opacity: 0.7; text-align: right; overflow-wrap: anywhere; }
 .ia-estado.lista { color: var(--cian); opacity: 1; }
 .ia-fila { display: flex; gap: 8px; margin-bottom: 6px; }
+.ia-nota { margin: 0 0 8px; font-size: 0.85em; opacity: 0.75; line-height: 1.35; }
 .ia-fila input { flex: 1; min-width: 0; }
 .adjunto-pc { white-space: nowrap; flex: none; padding: 6px 10px; font-size: 0.85em; }
 
