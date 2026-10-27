@@ -24,7 +24,8 @@ Las pestañas:
   piensa y te contesta hablando, hasta que digas «chau» o toques terminar. Con la cámara le mostrás algo; en la app
   de Android también puede ver la pantalla mientras usás otras apps.
   Al adjuntar algo aparece **«🖥️ A la PC»**: se lo pasa a JARVIS en la PC (cualquier archivo, hasta 2 GB; queda en
-  Documentos › Del celular).
+  Documentos › Del celular). Te hace **documentos, presentaciones y pósters** de verdad (Google Docs y Slides, con
+  botones para abrirlos y bajarlos en PDF; «a la PC» y llegan en Word, PowerPoint o PDF).
 - **Mi día**: el clima, tus recordatorios y tus pendientes.
 - **Mails**: los no leídos; te los lee, los resume o los contesta (mandar siempre con tu OK).
 
@@ -42,6 +43,7 @@ Están agrupados (tocá cada grupo para abrirlo):
 
 - **Voz**: cuándo lee las respuestas en voz alta, qué voz, la velocidad y el tono.
 - **Respuestas**: cómo te llama, si contesta corto o largo, y la app de música.
+- **Reportar un problema** (abajo de todo): manda la charla y cómo está la app a la PC, para que Claude lo revise.
 - **IAs de repuesto**: otra IA gratis, sin tarjeta, para cuando Gemini no tiene cupo o anda lento. Gemma ya anda sola
   (usa tu clave de Gemini); Groq, Mistral u OpenRouter, pegando su clave gratis.
 - **Avisos**: dónde llegan (en la app, en Telegram o en los dos), la hora del buen día (o nunca), lo de la noche,

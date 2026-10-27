@@ -15,7 +15,7 @@
 // ============================================================
 "use strict";
 
-const VERSION_APP = "2026.10.26.2";
+const VERSION_APP = "2026.10.26.3";
 const ANDROID_WEB = "https://rusty576.github.io/jarvis-celular/android/";   // el APK y su version.json
 const $ = (id) => document.getElementById(id);
 const Reco = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -1123,7 +1123,11 @@ async function hacerAcciones(acciones) {
     const r = await ultimoALaPc(a.texto);
     if (!r.ok && r.texto) problema = r.texto;
   }
-  acciones = (acciones || []).filter((a) => !["abrir_url", "imagen", "a_la_pc"].includes(a.tipo));
+  for (const a of (acciones || []).filter((x) => x.tipo === "reporte")) {   // «reportá esto»: la charla, a la PC
+    const r = await mandarReporte(a.que, {yaEnLaCharla: true});
+    if (!r.ok && r.texto) problema = r.texto;
+  }
+  acciones = (acciones || []).filter((a) => !["abrir_url", "imagen", "a_la_pc", "reporte"].includes(a.tipo));
   if (!acciones.length) return problema;
   if (!Nativo.hay) {
     if (Date.now() - ultimoToque < 4500) abrirUrl(accionAUrl(acciones[0]).url);
@@ -1138,7 +1142,7 @@ async function hacerAcciones(acciones) {
 
 function pintarAcciones(contenedor, acciones) {
   contenedor.innerHTML = "";
-  (acciones || []).filter((a) => a.tipo !== "imagen" && a.tipo !== "a_la_pc").forEach((a) => {   // (las imágenes van en la galería)
+  (acciones || []).filter((a) => !["imagen", "a_la_pc", "reporte"].includes(a.tipo)).forEach((a) => {   // (las imágenes van en la galería)
     const boton = document.createElement("button");
     boton.className = "accion";
     if (a.tipo === "abrir_url") {   // un documento que hizo JARVIS
@@ -1818,14 +1822,14 @@ function marcarNovedad(si) {
   if (pestana) pestana.classList.toggle("con-novedad", si);
 }
 
-function pensando(si) {
+function pensando(si, texto) {
   $("logo").classList.toggle("pensando", si);
   const viejo = document.querySelector(".msg.pensando");
   if (viejo) viejo.remove();
   if (si) {
     const div = document.createElement("div");
     div.className = "msg jarvis pensando";
-    div.textContent = "Pensando";
+    div.textContent = texto || "Pensando";
     listaDeMensajes().appendChild(div);
     bajar();
   }
@@ -1901,16 +1905,19 @@ async function mandar(texto, opciones = {}) {
     agregar({quien: "aviso", texto: "⏳ " + aviso});
     return {texto: aviso, tarjetas: [], acciones: [], error: true, enCola: soloTexto};
   }
-  pensando(true);
+  // un documento, una presentación o un póster tardan más (los arma de verdad, con imágenes): se espera más, y si igual
+  // se pasa, se sigue armando y aparece en la charla cuando esté (no contesta el cerebro del celular)
+  const creando = soloTexto && RE_CREAR.test(normalizar(texto));
+  pensando(true, creando ? "Armándolo" : undefined);
   // si el bot tarda (Gemini sin cupo o lento), el cerebro del celular se va cargando: si hace falta, contesta enseguida
-  const conCerebro = soloTexto && Nativo.hay && Cerebro.listo();
+  const conCerebro = soloTexto && !creando && Nativo.hay && Cerebro.listo();
   const precalentar = conCerebro ? setTimeout(() => Cerebro.preparar(), 12000) : null;
   try {
     const r = await api("app_mensaje", {texto: (contexto && texto ? contexto + " " : "") + (texto || ""),
                                          llamada: !!opciones.llamada, audio: opciones.audio || null,
                                          imagen: foto ? {mime: "image/jpeg", datos: foto.datos} : null,
                                          archivo: archivo ? {mime: archivo.mime, datos: archivo.datos, nombre: archivo.nombre} : null},
-                        archivo ? 180 : conCerebro ? 85 : 100);
+                        archivo ? 180 : creando ? 300 : conCerebro ? 85 : 100);
     clearTimeout(precalentar);
     if (r.pedido && !texto) {   // lo que entendió de la grabación, o lo que se preguntó de la foto
       mio.texto = (opciones.audio ? "🎙️ " : "") + r.pedido;
@@ -1945,6 +1952,12 @@ async function mandar(texto, opciones = {}) {
   } catch (e) {
     clearTimeout(precalentar);
     pensando(false);
+    if (creando && ["tiempo", "servidor", "no_json"].includes(e.tipo)) {
+      const aviso = "Lo sigo armando (con imágenes tarda un poco): cuando esté, aparece acá en la charla.";
+      agregar({quien: "aviso", texto: "⏳ " + aviso});
+      [60000, 150000, 300000].forEach((ms) => setTimeout(() => sincronizarCharla().catch(() => {}), ms));
+      return {texto: aviso, tarjetas: [], acciones: [], error: true};
+    }
     if (soloTexto && ["sin_red", "servidor", "http", "no_json", "tiempo"].includes(e.tipo)) {
       // se cortó internet, o Google no contesta: contesta el celular (si tiene el cerebro bajado)
       const r = await enElCelular(e.tipo === "sin_red" ? null : e.message.replace(/\s*Probá.*$/, "") + " Te contesto desde el celular.");
@@ -2204,6 +2217,8 @@ function sacarFoto() {
 
 const RE_A_LA_PC = /^(a|para|en) (la |mi )?(pc|compu|computadora)$|\b(mand|pas|envi|guard|sub|llev|tir|dej|copi|pon)\w*\b.*\b(a|en|para|hacia) (la |mi )?(pc|compu|computadora|notebook|laptop)\b/;
 const PEDAZO_SUBIDA = 4 * 1024 * 1024;   // (Drive pide pedazos de a 256 KB justos)
+// lo que tarda más porque JARVIS lo arma de verdad (Google Docs y Slides, con imágenes hechas a medida)
+const RE_CREAR = /\b(documento|presentacion|diapositiva|power ?point|poster|afiche|flyer|folleto|invitacion|cartel|infografia|triptico|curriculum)/;
 let ultimoAdjunto = null;   // lo último que mandaste ({adjunto, en}): si después decís «pasáselo a la PC», va esto
 
 function base64De(blob) {
@@ -2316,6 +2331,50 @@ function ultimoALaPc(texto) {
   return mandarALaPc(ultimoAdjunto.adjunto, texto, {yaEnLaCharla: true}).then((r) => ({ok: !r.error}));
 }
 
+
+// ---------- «Reportar un problema»: la charla (con quién contestó) y cómo está la app, a la PC, para revisarlos ----------
+// Va con lo del bot (sus errores, cómo están las IAs) a MiJarvis › reportes en la PC: ahí lo lee Claude. Sin claves.
+
+function charlaParaReporte() {
+  return mensajes.slice(-80).map((m) => ({
+    quien: m.quien, texto: String(m.texto || "").slice(0, 1500), ia: m.ia || (m.local ? "el celular (sin internet)" : ""),
+    en: m.en ? new Date(m.en).toISOString().slice(0, 16).replace("T", " ") : "",
+    extra: [m.aviso ? "aviso " + m.aviso : "", m.archivo ? "archivo " + m.archivo : "",
+            m.imagen || (m.imagenes || []).length ? "con imagen" : "",
+            (m.acciones || []).length ? "acciones: " + m.acciones.map((a) => a.tipo).join(", ") : "",
+            m.sincronizado ? "de Telegram o de otro momento" : "", m.deCola ? "salió de la cola" : ""].filter(Boolean).join(" · "),
+  }));
+}
+
+function diagnosticoParaReporte() {
+  const e = Nativo.hay ? Cerebro.estado() : null;
+  return {
+    version: VERSION_APP, android: Nativo.hay ? Nativo.info : null, internet: hayInternet(),
+    conexion: $("estado-conexion").textContent, cola: cola.length, pantalla: innerWidth + "x" + innerHeight,
+    cerebro: e ? {modelo: Cerebro.modelo(), listo: Cerebro.listo(), cargado: e.cargado, placa: e.placa, placaModo: e.placaModo,
+                  placaMala: e.placaMala} : null,
+    ajustes: {leer: ajustes.leer, modelo: ajustes.modelo, animaciones: ajustes.animaciones, musica: ajustes.musica},
+    navegador: navigator.userAgent.slice(0, 180),
+  };
+}
+
+async function mandarReporte(que, opciones = {}) {
+  // opciones.yaEnLaCharla: lo pidió JARVIS (el pedido ya se ve)
+  if (!opciones.yaEnLaCharla) agregar({quien: "vos", texto: "📨 Reportar un problema" + (que ? ": " + que : "")});
+  try {
+    const r = await api("app_reporte", {que: que || "", charla: charlaParaReporte(), diagnostico: diagnosticoParaReporte(),
+                                        version: VERSION_APP}, 120);
+    if (!r.ok) {
+      throw new Error(r.error === "acción desconocida" ? "hace falta el bot actualizado (decile a JARVIS en la PC "
+        + "«actualizá el bot del celular»)" : (r.error || "no pude"));
+    }
+    agregar({quien: "jarvis", texto: (r.mensajes || []).join("\n\n")});
+    return {ok: true};
+  } catch (e) {
+    agregar({quien: "aviso", texto: "No pude mandar el reporte: " + e.message});
+    return {ok: false, texto: "No pude mandar el reporte."};
+  }
+}
 
 // ---------- Las IAs de repuesto (Ajustes): cuando Gemini no tiene cupo o anda lento ----------
 
@@ -3925,6 +3984,13 @@ function conectarBotones() {
     Voz.decir("Hola, soy JARVIS. Así te voy a hablar.");
   };
   $("ver-pc").onclick = () => { $("ajustes").close(); cambiarVista("pc"); };
+  $("reportar").onclick = async () => {
+    const que = prompt("¿Qué anduvo mal? (contalo en pocas palabras, o dejalo vacío)", "");
+    if (que === null) return;
+    $("ajustes").close();
+    cambiarVista("charla");
+    await mandarReporte(que.trim());
+  };
   $("desconectar").onclick = () => {
     if (!confirm("¿Desconecto este celular de este JARVIS? Para volver a conectarlo, mandá /app en Telegram.")) return;
     ["conexion", "mensajes", "ultimaCharla", "dia", "cola"].forEach((c) => localStorage.removeItem(GUARDADO + c));
