@@ -1,8 +1,8 @@
 // El "service worker": guarda la app en el celular, así abre al toque (y aunque no haya internet se ve, con lo último
 // que tenía). Lo que se le pide a JARVIS siempre va por internet. Cambiá VERSION cuando publiques cambios: así los
 // celulares bajan la app nueva.
-const VERSION = "jarvis-2026.10.31.1";
-const ARCHIVOS = ["./", "index.html", "estilo.css", "fuentes.css", "app.js", "reactor.js", "manifest.webmanifest",
+const VERSION = "jarvis-2026.10.31.2";
+const ARCHIVOS = ["./", "index.html", "estilo.css", "fuentes.css", "app.js", "reactor.js", "tema.js", "manifest.webmanifest",
                   "iconos/icono-192.png", "iconos/icono-512.png", "iconos/icono-maskable-512.png", "iconos/apple-touch-icon.png",
                   "fuentes/Orbitron-700-latin.woff2", "fuentes/Orbitron-900-latin.woff2", "fuentes/Rajdhani-500-latin.woff2",
                   "fuentes/Rajdhani-600-latin.woff2"];

@@ -17,6 +17,7 @@
   <link rel="apple-touch-icon" href="iconos/apple-touch-icon.png">
   <link rel="stylesheet" href="fuentes.css">
   <link rel="stylesheet" href="estilo.css">
+  <script src="tema.js"></script>
 </head>
 <body>
 
@@ -98,7 +99,7 @@
       <button type="button" id="boton-adjuntar" class="icono-boton" aria-label="Mandar una foto o un archivo">
         <svg viewBox="0 0 24 24"><path d="M20 11.5l-7.8 7.8a5 5 0 0 1-7.1-7.1l8.3-8.3a3.4 3.4 0 0 1 4.8 4.8l-8.1 8.1a1.7 1.7 0 0 1-2.4-2.4l7.4-7.4"/></svg>
       </button>
-      <input id="archivo" type="file" hidden
+      <input id="archivo" type="file" multiple hidden
              accept="image/*,application/pdf,audio/*,video/*,text/*,.txt,.md,.csv,.json">
       <textarea id="caja" rows="1" placeholder="Escribile a JARVIS..." enterkeyhint="send"></textarea>
       <!-- Live (charlar manos libres, como Gemini Live): al lado del micrófono -->
@@ -145,6 +146,57 @@
       <input id="caja-orden" placeholder="Otra orden: «abrí Steam», «modo rendimiento»...">
       <button class="boton">Mandar</button>
     </form>
+  </section>
+
+  <!-- El almacenamiento del celular (protocolo «Almacenamiento», en la app de Android) -->
+  <section id="vista-almacen" class="vista">
+    <h2>ALMACENAMIENTO</h2>
+    <div class="tarjeta">
+      <div class="almacen-cabeza">
+        <div class="almacen-anillo" id="almacen-anillo"><b id="almacen-por">—</b><small>usado</small></div>
+        <div class="almacen-resumen">
+          <div class="almacen-barra"><i id="almacen-usado"></i></div>
+          <p class="ayuda" id="almacen-texto">Mirando…</p>
+          <div class="almacen-partes" id="almacen-partes"></div>
+        </div>
+      </div>
+      <div class="hoja-fila">
+        <button type="button" id="almacen-cache" class="boton">Limpiar la caché de JARVIS</button>
+        <button type="button" id="almacen-android" class="boton">Liberar espacio (Android)</button>
+        <button type="button" id="almacen-buscar" class="boton principal">Buscar lo que más ocupa</button>
+      </div>
+      <div id="almacen-grupos"></div>
+      <div class="hoja-fila" id="almacen-borrar-fila" hidden>
+        <button type="button" id="almacen-borrar" class="boton peligro">Borrar lo marcado</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- La bóveda: apps que piden un código para abrirse (protocolo «Bóveda», en la app de Android) -->
+  <section id="vista-boveda" class="vista">
+    <h2>BÓVEDA DE APPS</h2>
+    <div class="tarjeta">
+      <p class="ayuda">Las apps que pongas acá piden tu código antes de abrirse (WhatsApp, Galería, lo que quieras).</p>
+      <p class="ayuda" id="boveda-estado"></p>
+      <div id="boveda-sin-pin">
+        <label class="opcion">Código nuevo (4 a 8 números)
+          <input id="boveda-pin-nuevo" type="password" inputmode="numeric" autocomplete="off" maxlength="8"></label>
+        <label class="opcion">Repetilo
+          <input id="boveda-pin-otra" type="password" inputmode="numeric" autocomplete="off" maxlength="8"></label>
+        <div class="hoja-fila"><button type="button" id="boveda-crear" class="boton principal">Crear el código</button></div>
+      </div>
+      <div id="boveda-con-pin" hidden>
+        <button type="button" id="boveda-accesibilidad" class="boton" hidden>Prenderla en Accesibilidad</button>
+        <label class="opcion">Buscar una app <input id="boveda-buscar" autocomplete="off" placeholder="Ej: WhatsApp"></label>
+        <div id="boveda-apps" class="boveda-apps"></div>
+        <label class="opcion">Tu código (para guardar los cambios)
+          <input id="boveda-pin" type="password" inputmode="numeric" autocomplete="off" maxlength="8"></label>
+        <div class="hoja-fila">
+          <button type="button" id="boveda-guardar" class="boton principal">Guardar la bóveda</button>
+          <button type="button" id="boveda-vaciar" class="boton peligro">Borrar la bóveda y el código</button>
+        </div>
+      </div>
+    </div>
   </section>
 </main>
 
@@ -366,6 +418,12 @@
           <button type="button" data-color="violeta" aria-label="Violeta"></button>
         </div>
       </div>
+      <label class="opcion">Fondo
+        <select id="ajuste-fondo">
+          <option value="negro">Negro (como JARVIS en la PC)</option>
+          <option value="azul">Azul (el de antes)</option>
+        </select>
+      </label>
       <label class="opcion">Animaciones
         <select id="ajuste-animaciones">
           <option value="completas">Completas</option>
@@ -439,43 +497,6 @@
         <button type="button" id="ajuste-permisos" class="boton">Permisos</button>
       </div>
       </details>
-      <details class="grupo" id="grupo-boveda">
-        <summary>🔒 Bóveda de apps</summary>
-        <p class="ayuda">Las apps que pongas acá piden tu código antes de abrirse (WhatsApp, Galería, lo que quieras).</p>
-        <p class="ayuda" id="boveda-estado"></p>
-        <div id="boveda-sin-pin">
-          <label class="opcion">Código nuevo (4 a 8 números)
-            <input id="boveda-pin-nuevo" type="password" inputmode="numeric" autocomplete="off" maxlength="8"></label>
-          <label class="opcion">Repetilo
-            <input id="boveda-pin-otra" type="password" inputmode="numeric" autocomplete="off" maxlength="8"></label>
-          <div class="hoja-fila"><button type="button" id="boveda-crear" class="boton principal">Crear el código</button></div>
-        </div>
-        <div id="boveda-con-pin" hidden>
-          <button type="button" id="boveda-accesibilidad" class="boton" hidden>Prenderla en Accesibilidad</button>
-          <label class="opcion">Buscar una app <input id="boveda-buscar" autocomplete="off" placeholder="Ej: WhatsApp"></label>
-          <div id="boveda-apps" class="boveda-apps"></div>
-          <label class="opcion">Tu código (para guardar los cambios)
-            <input id="boveda-pin" type="password" inputmode="numeric" autocomplete="off" maxlength="8"></label>
-          <div class="hoja-fila">
-            <button type="button" id="boveda-guardar" class="boton principal">Guardar la bóveda</button>
-            <button type="button" id="boveda-vaciar" class="boton peligro">Borrar la bóveda y el código</button>
-          </div>
-        </div>
-      </details>
-      <details class="grupo" id="grupo-almacen">
-        <summary>💾 Almacenamiento</summary>
-        <div class="almacen-barra"><i id="almacen-usado"></i></div>
-        <p class="ayuda" id="almacen-texto">Mirando…</p>
-        <div class="hoja-fila">
-          <button type="button" id="almacen-cache" class="boton">Limpiar la caché de JARVIS</button>
-          <button type="button" id="almacen-android" class="boton">Liberar espacio (Android)</button>
-          <button type="button" id="almacen-buscar" class="boton principal">Buscar lo que más ocupa</button>
-        </div>
-        <div id="almacen-grupos"></div>
-        <div class="hoja-fila" id="almacen-borrar-fila" hidden>
-          <button type="button" id="almacen-borrar" class="boton peligro">Borrar lo marcado</button>
-        </div>
-      </details>
     </div>
     <!-- en la web app, en un Android: la app de verdad -->
     <div id="ajustes-android" hidden>
@@ -487,6 +508,8 @@
     </div>
     <div class="hoja-fila otros">
       <button type="button" id="ver-pc" class="boton">La PC</button>
+      <button type="button" id="ver-almacen" class="boton solo-nativa">💾 Almacenamiento</button>
+      <button type="button" id="ver-boveda" class="boton solo-nativa">🔒 Bóveda de apps</button>
       <button type="button" id="reportar" class="boton">Reportar un problema</button>
       <button type="button" id="ajuste-actualizar" class="boton solo-nativa">Buscar actualización</button>
     </div>
