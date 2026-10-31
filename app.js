@@ -15,7 +15,7 @@
 // ============================================================
 "use strict";
 
-const VERSION_APP = "2026.10.26.3";
+const VERSION_APP = "2026.10.31.1";
 const ANDROID_WEB = "https://rusty576.github.io/jarvis-celular/android/";   // el APK y su version.json
 const $ = (id) => document.getElementById(id);
 const Reco = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -298,6 +298,30 @@ function vozReactores(nivel) {
 
 // ---------- La voz de JARVIS (las voces del celular) ----------
 
+// ---------- El eco: que JARVIS no se escuche a sí mismo ----------
+// Pasó (08:53): el micrófono agarró la respuesta que JARVIS estaba diciendo por el parlante y la mandó como si la
+// hubieras dicho vos, y se armó un bucle. Lo que se dijo en voz alta (o se acaba de contestar) queda anotado unos
+// segundos, y lo que «escuche» parecido a eso no se manda.
+const Eco = {
+  texto: "", hasta: 0,
+  anotar(texto) { this.texto = String(texto || ""); this.hasta = Date.now() + 120000; },
+  termino() { this.hasta = Math.max(this.hasta, Date.now() + 25000); },
+  palabras(t) { return normalizar(t).split(/\s+/).filter((w) => w.length > 2); },
+  es(texto) {
+    const dicho = this.palabras(texto);
+    if (dicho.length < 3) return false;
+    const fuentes = [];
+    if (Date.now() < this.hasta) fuentes.push(this.texto);
+    const ultimo = mensajes.slice().reverse().find((m) => m.quien === "jarvis");
+    if (ultimo && ultimo.en && Date.now() - ultimo.en < 120000) fuentes.push(ultimo.texto);
+    return fuentes.some((f) => {
+      const suyas = new Set(this.palabras(f));
+      const iguales = dicho.filter((w) => suyas.has(w)).length;
+      return iguales / dicho.length >= 0.7;
+    });
+  },
+};
+
 const Voz = {
   turno: 0,   // cada vez que habla o se calla cambia: así una frase vieja no sigue sonando
 
@@ -336,6 +360,17 @@ const Voz = {
   },
 
   async decir(texto) {
+    Eco.anotar(texto);
+    hablando(true);
+    try {
+      await this._decir(texto);
+    } finally {
+      hablando(false);
+      Eco.termino();
+    }
+  },
+
+  async _decir(texto) {
     if (Nativo.hay) {   // la voz de Android: entero de una vez (sin cortes entre frases)
       this.callar();
       const limpio = this.limpiar(texto);
@@ -739,6 +774,7 @@ function elMejor(lista, buscado, clave) {
   const puntaje = (x) => {
     const n = clave(x);
     if (n === q) return 100;
+    if (n.replace(/\s+/g, "") === q.replace(/\s+/g, "")) return 95;   // «metro list» -> «Metrolist»
     if (n.startsWith(q + " ")) return 90;            // «Juan» -> «Juan Pérez» (antes que «Juana»)
     if (n.split(" ").includes(q)) return 85;         // «Pérez» -> «Juan Pérez»
     if (n.startsWith(q)) return 75 - Math.min(20, n.length - q.length);
@@ -1282,6 +1318,18 @@ function respuestaLocal(t) {
     const manana = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate() + 1);
     return `Mañana es ${DIAS[manana.getDay()]} ${manana.getDate()} de ${MESES[manana.getMonth()]}.`;
   }
+  if (Nativo.hay && window.JarvisNativo.espacio && /^(?:cuanto|que)\s+(?:espacio|lugar|almacenamiento|memoria)(?:\s+libre)?(?:\s+(?:me queda|tengo|hay|queda|tiene el celular))?(?:\s+en el celular)?$/.test(t)) {
+    const e = Nativo.ya("espacio");
+    if (e.ok) return `Te quedan ${gb(e.libre)} libres de ${gb(e.total)}. Para liberar, Ajustes › Almacenamiento.`;
+  }
+  if (Nativo.hay && /^(?:abr[ie]\w*|mostra\w*)\s+(?:la\s+)?boveda(?:\s+de\s+apps)?$/.test(t)) {
+    setTimeout(() => { abrirAjustes(); $("grupo-boveda").open = true; pintarBoveda(); }, 300);
+    return "Te abro la bóveda.";
+  }
+  if (Nativo.hay && /^(?:libera\w*|limpia\w*)\s+(?:el\s+)?(?:espacio|lugar|almacenamiento|celular|memoria)$/.test(t)) {
+    setTimeout(() => { abrirAjustes(); $("grupo-almacen").open = true; pintarAlmacen(false); }, 300);
+    return "Te muestro qué ocupa lugar: elegí qué borrar.";
+  }
   if (Nativo.hay && /^(?:(?:cuanta|que|cuanto de|como (?:esta|anda) (?:la|mi))\s+)?bateria(?:\s+(?:tengo|me queda|hay|queda|tiene el celular))?$/.test(t)) {
     const b = Nativo.ya("bateria");
     return `Tenés ${b.nivel}% de batería${b.cargando ? " y se está cargando" : ""}.`;
@@ -1418,6 +1466,10 @@ function sistemaDelCelular() {
       + "en voz alta, sin listas, sin asteriscos y sin emojis.",
     "Preguntas sobre el mundo (historia, ciencia, geografía, libros, idiomas, cuentas, recetas, consejos, cómo hacer "
       + "algo): contestalas con lo que sabés, directo, como siempre. Para eso no hace falta internet: no lo menciones.",
+    "Vos solo podés conversar: NO podés anotar pendientes ni recordatorios, ni guardar recuerdos, ni abrir apps, ni "
+      + "hacer nada en el celular o la PC. Nunca digas que anotaste, agregaste, guardaste o hiciste algo. Si te piden "
+      + "anotar algo, explicá cómo pedirlo para que la app lo anote sola: «agregá comprar pan a mis pendientes» o "
+      + "«recordame mañana a las 9 llamar al dentista».",
     "Sobre su vida, usá solo lo que está abajo; si no está, decí que no lo sabés. Sin internet no podés ver datos que "
       + "cambian (precios, cotizaciones, noticias, resultados de partidos), sus mails ni mandarle órdenes a la PC: eso, "
       + "cuando vuelva internet.",
@@ -1536,7 +1588,9 @@ function datoSinInternet(texto) {
   const t = paraAnotar(texto);
   if (!datosDia) datosDia = {pendientes: [], recordatorios: [], recuerdos: []};
   const sincronizar = () => encolar({accion: "app_mensaje", datos: {texto: t}, silencioso: true});
-  let m = /^(?:agreg[aá](?:me)?|anot[aá](?:me)?|sum[aá](?:me)?|pon[eé](?:me)?)\s+(.+?)\s+(?:a|en)\s+(?:mis\s+|los\s+|la\s+lista\s+de\s+)?pendientes$/i.exec(t);
+  let m = /^(?:agreg[aá](?:me)?|anot[aá](?:me)?|sum[aá](?:me)?|pon[eé](?:me)?)\s+(.+?)\s+(?:a|en)\s+(?:mis\s+|los\s+|las\s+|la\s+lista\s+de\s+)?(?:pendientes|tareas|cosas para hacer)$/i.exec(t)
+    || /^(?:agreg[aá](?:me)?|anot[aá](?:me)?|sum[aá](?:me)?|pon[eé](?:me)?|cre[aá](?:me)?)\s+(?:un\s+|una\s+|el\s+|la\s+)?(?:nuevo\s+)?(?:pendiente|tarea)s?\s*(?::|de|que|para)?\s+(.+)$/i.exec(t)
+    || /^(?:tengo que|no me olvide de|no me tengo que olvidar de)\s+(.+)$/i.exec(t);
   if (m) {
     const p = m[1].charAt(0).toUpperCase() + m[1].slice(1);
     datosDia.pendientes.push({id: "cel" + Date.now(), texto: p, para: null});
@@ -1552,7 +1606,7 @@ function datoSinInternet(texto) {
     sincronizar();
     return "Dale, me lo acuerdo.";
   }
-  m = /^(?:record[aá]me|acord[aá]me|avis[aá]me)\s+(.+)$/i.exec(t);
+  m = /^(?:record[aá]me|acord[aá]me|avis[aá]me|(?:pon[eé]me|cre[aá]me|agreg[aá]me|anot[aá]me)\s+(?:un\s+)?recordatorio(?:\s+(?:de|para|que))?)\s+(.+)$/i.exec(t);
   if (m) {
     const r = cuandoDelRecordatorio(m[1]);
     if (!r) return "¿Para cuándo? Decímelo así: «recordame mañana a las 9 llamar al dentista».";
@@ -1619,6 +1673,282 @@ async function contestarEnElCelular(texto, opciones) {
 }
 
 
+// ---------- La bóveda de apps (piden tu código antes de abrirse) ----------
+
+let bovedaElegidas = new Set();
+
+function pintarBoveda() {
+  if (!Nativo.hay || !window.JarvisNativo.bovedaEstado) return;
+  const e = Nativo.ya("bovedaEstado");
+  bovedaElegidas = new Set(e.apps || []);
+  $("boveda-sin-pin").hidden = e.pin;
+  $("boveda-con-pin").hidden = !e.pin;
+  $("boveda-accesibilidad").hidden = !e.pin || e.prendida;
+  $("boveda-estado").textContent = !e.pin ? "Primero, un código (como el del celular, pero solo para estas apps)."
+    : !e.prendida ? "⚠️ Falta prenderla: tocá «Prenderla en Accesibilidad» y activá «JARVIS · Bóveda»."
+    : `✓ Funcionando: ${bovedaElegidas.size} app${bovedaElegidas.size === 1 ? "" : "s"} en la bóveda.`;
+  if (e.pin) pintarAppsBoveda();
+}
+
+function pintarAppsBoveda() {
+  const filtro = normalizar($("boveda-buscar").value || "");
+  const lista = Telefono.apps().slice().sort((a, b) => (bovedaElegidas.has(b.paquete) - bovedaElegidas.has(a.paquete))
+                                                         || a.nombre.localeCompare(b.nombre));
+  const caja = $("boveda-apps");
+  caja.innerHTML = "";
+  lista.filter((a) => !filtro || a.clave.includes(filtro)).slice(0, 200).forEach((a) => {
+    const fila = document.createElement("label");
+    fila.className = "boveda-app" + (bovedaElegidas.has(a.paquete) ? " en-boveda" : "");
+    const c = document.createElement("input");
+    c.type = "checkbox";
+    c.checked = bovedaElegidas.has(a.paquete);
+    c.onchange = () => {
+      if (c.checked) bovedaElegidas.add(a.paquete); else bovedaElegidas.delete(a.paquete);
+      fila.classList.toggle("en-boveda", c.checked);
+    };
+    const n = document.createElement("span");
+    n.textContent = a.nombre;
+    fila.append(c, n);
+    caja.appendChild(fila);
+  });
+}
+
+function conectarBoveda() {
+  $("boveda-crear").onclick = () => {
+    const a = $("boveda-pin-nuevo").value, b = $("boveda-pin-otra").value;
+    if (a !== b) return avisar("Los dos códigos no son iguales.");
+    const r = Nativo.ya("bovedaPin", "", a);
+    if (!r.ok) return avisar(r.error);
+    $("boveda-pin-nuevo").value = $("boveda-pin-otra").value = "";
+    avisar("Listo, código creado. Ahora elegí las apps.");
+    pintarBoveda();
+  };
+  $("boveda-buscar").oninput = pintarAppsBoveda;
+  $("boveda-accesibilidad").onclick = () => {
+    window.JarvisNativo.abrirAccesibilidad();
+    avisar("Buscá «JARVIS · Bóveda» y activala. Después volvé acá.", 6);
+  };
+  $("boveda-guardar").onclick = () => {
+    const r = Nativo.ya("bovedaApps", $("boveda-pin").value, JSON.stringify([...bovedaElegidas]));
+    if (!r.ok) return avisar(r.error);
+    $("boveda-pin").value = "";
+    avisar(`Listo: ${bovedaElegidas.size} app${bovedaElegidas.size === 1 ? "" : "s"} en la bóveda.`);
+    pintarBoveda();
+  };
+  $("boveda-vaciar").onclick = () => {
+    if (!confirm("¿Borrar la bóveda y el código? Las apps se abren normal otra vez.")) return;
+    const r = Nativo.ya("bovedaBorrar", $("boveda-pin").value);
+    if (!r.ok) return avisar(r.error + " (poné tu código en «Tu código»)");
+    $("boveda-pin").value = "";
+    avisar("Listo, bóveda borrada.");
+    pintarBoveda();
+  };
+}
+
+// ---------- Almacenamiento: qué ocupa lugar y liberarlo ----------
+
+let almacenMarcados = new Map();   // uri -> tamaño
+
+function gb(bytes) {
+  return bytes >= 1e9 ? (bytes / 1e9).toFixed(1).replace(".", ",") + " GB" : Math.round(bytes / 1e6) + " MB";
+}
+
+async function pintarAlmacen(conArchivos) {
+  if (!Nativo.hay || !window.JarvisNativo.almacenamiento) return;
+  if (conArchivos) $("almacen-texto").textContent = "Buscando lo que más ocupa…";
+  const r = await Nativo.cuando("almacenamiento", !!conArchivos);
+  if (!r.ok) {
+    $("almacen-texto").textContent = "No pude mirar el almacenamiento (" + (r.error || "") + ").";
+    return;
+  }
+  const usado = r.total - r.libre;
+  $("almacen-usado").style.width = Math.round(usado / r.total * 100) + "%";
+  document.querySelector(".almacen-barra").classList.toggle("lleno", r.libre / r.total < 0.1);
+  $("almacen-texto").textContent = `Libres ${gb(r.libre)} de ${gb(r.total)}. JARVIS ocupa ${gb(r.cache)} de caché`
+    + (r.cerebro > 1e8 ? ` y ${gb(r.cerebro)} del cerebro sin internet.` : ".");
+  if (!conArchivos) return;
+  almacenMarcados = new Map();
+  const caja = $("almacen-grupos");
+  caja.innerHTML = "";
+  (r.grupos || []).filter((g) => g.archivos.length).forEach((g) => {
+    const det = document.createElement("details");
+    det.className = "almacen-grupo";
+    const sum = document.createElement("summary");
+    sum.innerHTML = "<span></span><b></b>";
+    sum.firstChild.textContent = `${g.titulo} (${g.archivos.length})`;
+    sum.lastChild.textContent = gb(g.total);
+    det.appendChild(sum);
+    const todos = document.createElement("button");
+    todos.type = "button";
+    todos.className = "boton chico almacen-todos";
+    todos.textContent = "Marcar todos";
+    det.appendChild(todos);
+    const casillas = [];
+    g.archivos.forEach((a) => {
+      const fila = document.createElement("label");
+      fila.className = "almacen-archivo";
+      const c = document.createElement("input");
+      c.type = "checkbox";
+      c.onchange = () => {
+        if (c.checked) almacenMarcados.set(a.uri, a.tam); else almacenMarcados.delete(a.uri);
+        pintarBotonBorrar();
+      };
+      casillas.push(c);
+      const datos = document.createElement("span");
+      datos.innerHTML = "<b></b><small></small>";
+      datos.firstChild.textContent = a.nombre;
+      datos.lastChild.textContent = new Date(a.fecha).toLocaleDateString("es") + " · " + (a.ruta || "").replace(/\/$/, "");
+      const tam = document.createElement("em");
+      tam.textContent = gb(a.tam);
+      fila.append(c, datos, tam);
+      det.appendChild(fila);
+    });
+    todos.onclick = () => {
+      const marcar = casillas.some((c) => !c.checked);
+      casillas.forEach((c) => { c.checked = marcar; c.onchange(); });
+      todos.textContent = marcar ? "Desmarcar todos" : "Marcar todos";
+    };
+    caja.appendChild(det);
+  });
+  if (!caja.children.length) caja.innerHTML = '<p class="ayuda">No encontré nada grande para borrar. ¡Está prolijo!</p>';
+  pintarBotonBorrar();
+}
+
+function pintarBotonBorrar() {
+  const total = [...almacenMarcados.values()].reduce((a, b) => a + b, 0);
+  $("almacen-borrar-fila").hidden = !almacenMarcados.size;
+  $("almacen-borrar").textContent = `Borrar ${almacenMarcados.size} archivo${almacenMarcados.size === 1 ? "" : "s"} (${gb(total)})`;
+}
+
+function conectarAlmacen() {
+  $("grupo-almacen").addEventListener("toggle", () => { if ($("grupo-almacen").open) pintarAlmacen(false); });
+  $("grupo-boveda").addEventListener("toggle", () => { if ($("grupo-boveda").open) pintarBoveda(); });
+  $("almacen-cache").onclick = () => {
+    const r = Nativo.ya("limpiarCache");
+    avisar(`Listo, liberé ${gb(r.liberado || 0)}.`);
+    pintarAlmacen(false);
+  };
+  $("almacen-android").onclick = () => window.JarvisNativo.liberarEspacio();
+  $("almacen-buscar").onclick = async () => {
+    if (!(await Nativo.cuando("pedirPermiso", "fotos")).si) return avisar("Sin el permiso de fotos y videos no puedo ver qué ocupa lugar.");
+    pintarAlmacen(true);
+  };
+  $("almacen-borrar").onclick = async () => {
+    const r = await Nativo.cuando("borrarArchivos", JSON.stringify([...almacenMarcados.keys()]));
+    if (r.ok) {
+      avisar("Listo, los borré.");
+      pintarAlmacen(true);
+    } else if (r.error === "android_viejo") {
+      avisar("En este Android no puedo borrarlos desde acá: tocá «Liberar espacio (Android)».", 6);
+    }
+  };
+}
+
+// ---------- Enseñarle tu voz a «Hey Jarvis» (el verificador del celular) ----------
+
+const Entrenar = {
+  paso: 0, veces: 0, puntajes: [], ocupado: false,
+
+  abrir() {
+    if (!Nativo.hay || !window.JarvisNativo.entrenarJarvis) return avisar("Esto es de la app de Android.");
+    this.paso = 0; this.veces = 0; this.puntajes = [];
+    if (!$("entrenar").open) $("entrenar").showModal();   // (un diálogo: queda encima de Ajustes)
+    this.mostrar("Enseñale tu voz a «Hey Jarvis»", "Vas a decir «Hey Jarvis» 5 veces, como se lo dirías de verdad (a tu "
+      + "distancia de siempre). Esperá a que diga «¡Ahora!». Después, 12 segundos de lo que suele sonar alrededor.", "Empezar");
+    Nativo.cuando("entrenarJarvis", "empezar");
+  },
+
+  mostrar(titulo, texto, boton, paso) {
+    $("entrenar-titulo").textContent = titulo;
+    $("entrenar-texto").textContent = texto;
+    $("entrenar-seguir").textContent = boton || "Seguir";
+    $("entrenar-seguir").hidden = !boton;
+    $("entrenar-paso").textContent = paso || "";
+  },
+
+  onda(estado) {
+    $("entrenar-onda").className = "entrenar-onda" + (estado ? " " + estado : "");
+  },
+
+  async seguir() {
+    if (this.ocupado) return;
+    this.ocupado = true;
+    try {
+      if (this.veces < 5) await this.unaVez();
+      else if (this.paso === 0) await this.fondo();
+      else await this.terminar();
+    } finally {
+      this.ocupado = false;
+    }
+  },
+
+  async unaVez() {
+    const n = this.veces + 1;
+    this.mostrar("Preparate…", "Cuando aparezca «¡Ahora!», decí «Hey Jarvis».", null, `${n} de 5`);
+    this.onda("grabando");
+    const espera = setTimeout(() => { this.mostrar("¡Ahora!", "Decí «Hey Jarvis»", null, `${n} de 5`); this.onda("grabando ahora"); }, 1300);
+    const r = await Nativo.cuando("entrenarJarvis", "voz");
+    clearTimeout(espera);
+    this.onda("");
+    if (!r.ok) {
+      this.mostrar("No pude grabar", "El micrófono está ocupado o no tiene permiso (" + (r.error || "") + ").", "Probar de nuevo", `${n} de 5`);
+      return;
+    }
+    if (!r.puntaje) {
+      this.mostrar("No te escuché", "Decilo un poco más fuerte, justo cuando aparezca «¡Ahora!».", "Probar de nuevo", `${n} de 5`);
+      return;
+    }
+    this.veces = r.veces;
+    this.puntajes.push(r.puntaje);
+    if (this.veces < 5) this.mostrar("¡Bien!", `Listo la ${n}ª. Vamos con la siguiente.`, "Seguir", `${n} de 5`);
+    else this.mostrar("¡Listo tu voz!", "Ahora 12 segundos de fondo: dejá sonar lo de siempre (la tele, la música, "
+      + "gente charlando) o hablá de cualquier otra cosa. NO digas «Jarvis».", "Grabar el fondo", "6 de 6");
+  },
+
+  async fondo() {
+    this.mostrar("Grabando el fondo…", "12 segundos. Hablá de otra cosa o dejá el ruido de siempre.", null, "6 de 6");
+    this.onda("grabando");
+    const r = await Nativo.cuando("entrenarJarvis", "fondo");
+    this.onda("");
+    if (!r.ok) {
+      this.mostrar("No pude grabar", r.error || "Probá de nuevo.", "Grabar el fondo", "6 de 6");
+      return;
+    }
+    this.paso = 1;
+    await this.terminar();
+  },
+
+  async terminar() {
+    this.mostrar("Aprendiendo…", "Un segundo.", null, "");
+    const r = await Nativo.cuando("entrenarJarvis", "listo");
+    if (!r.ok) {
+      this.mostrar("No pude terminar", r.error || "Probá de nuevo.", "Cerrar", "");
+      this.paso = 2;
+      return;
+    }
+    ajustes.vozEntrenada = Date.now();
+    guardar("ajustes", ajustes);
+    this.mostrar("¡Ya te conoce!", `Aprendió tu «Hey Jarvis» (acertó ${Math.round(r.aciertos * 100)}% de lo grabado). Desde `
+      + "ahora se despierta con vos y casi nunca con ruidos o charlas. Si algún día no te reconoce, enseñale de nuevo.", "Listo", "");
+    this.paso = 3;
+    pintarEstadoVoz();
+  },
+
+  cerrar() {
+    if ($("entrenar").open) $("entrenar").close();
+    this.onda("");
+  },
+};
+
+function pintarEstadoVoz() {
+  if (!Nativo.hay || !window.JarvisNativo.jarvisEntrenado) return;
+  const hay = Nativo.ya("jarvisEntrenado") === true;
+  $("olvidar-voz").hidden = !hay;
+  $("entrenar-jarvis").textContent = hay ? "🎙️ Enseñarle de nuevo" : "🎙️ Enseñarle mi voz";
+  $("estado-voz").textContent = hay ? "✓ Ya conoce tu voz: se despierta con vos (la sensibilidad de arriba ya no hace falta)." : "";
+}
+
+
 // ---------- La charla ----------
 
 function escapar(texto) {
@@ -1670,12 +2000,7 @@ function pintarMensaje(m, indice) {
     div.appendChild(img);
   }
   if (m.imagenes && m.imagenes.length) div.appendChild(pintarGaleria(m));
-  if (m.archivo) {
-    const archivo = document.createElement("span");
-    archivo.className = "archivo-adjunto";
-    archivo.textContent = "📄 " + m.archivo;
-    div.appendChild(archivo);
-  }
+  if (m.archivo) div.appendChild(tarjetaArchivo(m.archivo, m.archivoInfo));
   if (m.acciones && m.acciones.length) {
     const caja = document.createElement("div");
     caja.className = "acciones";
@@ -1686,15 +2011,36 @@ function pintarMensaje(m, indice) {
   return div;
 }
 
+function tipoDeTarjeta(texto) {
+  const n = normalizar(texto || "");
+  if (/\b(borr|elimin|tir\w* a la papelera)/.test(n)) return {icono: "🗑️", titulo: "Borrar", clase: "peligro"};
+  if (/\b(mail|correo|gmail)\b/.test(n)) return {icono: "✉️", titulo: "Mandar el mail", clase: ""};
+  if (/\bwhats\w*|\bmensaje\b/.test(n)) return {icono: "💬", titulo: "Mandar el mensaje", clase: ""};
+  if (/\b(pc|compu|computadora)\b/.test(n)) return {icono: "🖥️", titulo: "Orden para la PC", clase: ""};
+  if (/\b(llam)/.test(n)) return {icono: "📞", titulo: "Llamar", clase: ""};
+  return {icono: "❔", titulo: "¿Lo hago?", clase: ""};
+}
+
 function pintarTarjeta(t, indiceMensaje, indiceTarjeta) {
   // Algo que hay que confirmar (mandar un mail, borrar, una orden para la PC): no se hace sin tu botón
+  const tipo = tipoDeTarjeta(t.texto);
   const caja = document.createElement("div");
-  caja.className = "tarjeta-confirmar";
-  caja.textContent = t.texto;
+  caja.className = "tarjeta-confirmar " + tipo.clase;
+  const cabeza = document.createElement("div");
+  cabeza.className = "tarjeta-cabeza";
+  cabeza.innerHTML = `<span class="tarjeta-icono"></span><b></b>`;
+  cabeza.firstChild.textContent = tipo.icono;
+  cabeza.lastChild.textContent = tipo.titulo;
+  const cuerpo = document.createElement("div");
+  cuerpo.className = "tarjeta-cuerpo";
+  cuerpo.textContent = t.texto;
+  caja.append(cabeza, cuerpo);
   if (t.resultado) {
+    const cancelado = /^cancel/i.test(t.resultado);
+    caja.classList.add(cancelado ? "cancelada" : "hecha");
     const r = document.createElement("div");
     r.className = "resultado";
-    r.textContent = "→ " + t.resultado;
+    r.textContent = (cancelado ? "✕ " : "✓ ") + t.resultado;
     caja.appendChild(r);
     return caja;
   }
@@ -1824,15 +2170,50 @@ function marcarNovedad(si) {
 
 function pensando(si, texto) {
   $("logo").classList.toggle("pensando", si);
+  document.body.classList.toggle("pensando-ya", si);
   const viejo = document.querySelector(".msg.pensando");
   if (viejo) viejo.remove();
   if (si) {
     const div = document.createElement("div");
     div.className = "msg jarvis pensando";
-    div.textContent = texto || "Pensando";
+    const t = document.createElement("span");
+    t.className = "pensando-texto";
+    t.textContent = texto || "Pensando";
+    const parar = document.createElement("button");
+    parar.type = "button";
+    parar.className = "boton-detener";
+    parar.innerHTML = "<i></i>Detener";
+    parar.onclick = detenerTodo;
+    div.append(t, parar);
     listaDeMensajes().appendChild(div);
     bajar();
   }
+}
+
+// Detener: corta lo que está pensando (la respuesta del bot, si llega después, se descarta) y lo que está diciendo
+const Detener = {turno: 0};
+
+function hablando(si) {
+  document.body.classList.toggle("hablando-ya", si);
+  let b = $("parar-voz");
+  if (!b) {
+    b = document.createElement("button");
+    b.id = "parar-voz";
+    b.type = "button";
+    b.className = "parar-voz";
+    b.innerHTML = "<i></i>Callar";
+    b.onclick = () => { Voz.callar(); hablando(false); };
+    document.body.appendChild(b);
+  }
+}
+
+function detenerTodo() {
+  Detener.turno++;
+  Voz.callar();
+  hablando(false);
+  try { if (Nativo.hay && Cerebro.estado && Cerebro.estado() && Cerebro.parar) Cerebro.parar(); } catch (e) { /* (sin cerebro) */ }
+  pensando(false);
+  avisar("Listo, lo dejé.");
 }
 
 async function mandar(texto, opciones = {}) {
@@ -1848,8 +2229,14 @@ async function mandar(texto, opciones = {}) {
     agregar({quien: "aviso", texto: aviso});
     return {texto: aviso, tarjetas: [], acciones: [], error: true};
   }
+  if (opciones.porVoz && texto && Eco.es(texto)) {   // era JARVIS mismo, escuchado por el parlante
+    agregar({quien: "aviso", texto: "🔁 Eso lo había dicho yo (me escuché por el parlante): no lo mando."});
+    return {texto: "", tarjetas: [], acciones: [], error: true, eco: true};
+  }
+  const miTurno = Detener.turno;
   const mio = agregar({quien: "vos", texto: texto || (opciones.audio ? "🎙️ ..." : ""), imagen: foto ? foto.miniatura : null,
-                       archivo: archivo ? archivo.nombre : null});
+                       archivo: archivo ? archivo.nombre : null,
+                       archivoInfo: archivo ? {mime: archivo.mime || "", tam: archivo.tam || 0} : undefined});
   // un archivo de texto, sin internet: lo lee el cerebro del celular
   const textoDelArchivo = archivo && !hayInternet() ? leerTexto(archivo) : null;
   const local = !foto && !archivo && !opciones.audio && texto ? await hacerLocal(texto) : null;   // «abrí WhatsApp», «linterna»: al toque
@@ -1919,6 +2306,7 @@ async function mandar(texto, opciones = {}) {
                                          archivo: archivo ? {mime: archivo.mime, datos: archivo.datos, nombre: archivo.nombre} : null},
                         archivo ? 180 : creando ? 300 : conCerebro ? 85 : 100);
     clearTimeout(precalentar);
+    if (miTurno !== Detener.turno) return {texto: "", tarjetas: [], acciones: [], cancelado: true};   // (tocaste Detener)
     if (r.pedido && !texto) {   // lo que entendió de la grabación, o lo que se preguntó de la foto
       mio.texto = (opciones.audio ? "🎙️ " : "") + r.pedido;
       guardar("mensajes", mensajes);
@@ -1952,6 +2340,7 @@ async function mandar(texto, opciones = {}) {
   } catch (e) {
     clearTimeout(precalentar);
     pensando(false);
+    if (miTurno !== Detener.turno) return {texto: "", tarjetas: [], acciones: [], cancelado: true};
     if (creando && ["tiempo", "servidor", "no_json"].includes(e.tipo)) {
       const aviso = "Lo sigo armando (con imágenes tarda un poco): cuando esté, aparece acá en la charla.";
       agregar({quien: "aviso", texto: "⏳ " + aviso});
@@ -2054,11 +2443,17 @@ async function sincronizarCharla(datos) {
     yaEstan.add(m.quien + "|" + limpio(m.texto));
     (m.tarjetas || []).forEach((t) => { if (t.resultado) yaEstan.add("jarvis|" + t.resultado); });
   });
+  // el bot guarda las respuestas largas recortadas: si lo que llega es el principio de algo que ya se ve, es lo mismo
+  const recientes = mensajes.slice(-80).map((m) => ({quien: m.quien, texto: limpio(m.texto)}));
+  const esRecorte = (quien, t) => {
+    const corto = t.replace(/(\.\.\.|…)$/, "").trim();
+    return corto.length >= 40 && recientes.some((m) => m.quien === quien && m.texto.startsWith(corto.slice(0, Math.min(corto.length, 400))));
+  };
   charla.slice(desde).forEach((m) => {
     const quien = m.r === "user" ? "vos" : "jarvis";
     const texto = m.t.replace(/^\(Te mandó [^)]*\)\s*/, "").replace(/^\(La PC hizo lo que pediste\)\s*/, "")
       .replace(/^\(Desde la app, orden para la PC\)\s*/, "🖥️ Orden para la PC: ");
-    if (yaEstan.has(quien + "|" + limpio(texto))) return;
+    if (yaEstan.has(quien + "|" + limpio(texto)) || esRecorte(quien, limpio(texto))) return;
     yaEstan.add(quien + "|" + limpio(texto));
     // (las imágenes de ese mensaje —una de Telegram, la captura de la PC— se traen del bot)
     const nuevo = agregar({quien: quien, texto: texto, sincronizado: true,
@@ -2132,13 +2527,49 @@ function leerTexto(archivo) {
   }
 }
 
+const TIPOS_ARCHIVO = [
+  [/\.pdf$/i, "PDF", "#ff5a6a"], [/\.(docx?|odt|rtf)$/i, "WORD", "#4d8bff"], [/\.(xlsx?|ods|csv)$/i, "EXCEL", "#3ccf7a"],
+  [/\.(pptx?|odp|key)$/i, "PPT", "#ff9f1c"], [/\.(png|jpe?g|gif|webp|heic|bmp)$/i, "IMG", "#b07bff"],
+  [/\.(mp3|wav|ogg|m4a|aac|flac|opus)$/i, "AUDIO", "#ff7ab8"], [/\.(mp4|mov|mkv|webm|avi|3gp)$/i, "VIDEO", "#ff7a59"],
+  [/\.(zip|rar|7z|tar|gz)$/i, "ZIP", "#c9a227"], [/\.(txt|md|json|py|js|html|css|java|c|cpp)$/i, "TXT", "#9aa4ab"],
+];
+
+function tarjetaArchivo(nombre, info) {
+  // Un archivo que mandaste: el tipo con su color, el nombre y el tamaño (como en las apps de mensajes)
+  const tipo = TIPOS_ARCHIVO.find(([re]) => re.test(nombre)) || [null, "ARCH", "#29d9ff"];
+  const caja = document.createElement("div");
+  caja.className = "tarjeta-archivo";
+  const icono = document.createElement("span");
+  icono.className = "archivo-icono";
+  icono.style.setProperty("--tipo", tipo[2]);
+  icono.textContent = tipo[1];
+  const datos = document.createElement("span");
+  datos.className = "archivo-datos";
+  const n = document.createElement("b");
+  n.textContent = nombre;
+  const d = document.createElement("small");
+  d.textContent = [tipo[1] === "ARCH" ? "Archivo" : tipo[1], info && info.tam ? tamanoLindo(info.tam) : ""].filter(Boolean).join(" · ");
+  datos.append(n, d);
+  caja.append(icono, datos);
+  return caja;
+}
+
 function mostrarAdjunto(adjunto) {
   adjuntoListo = adjunto;
   const esFoto = adjunto.tipo === "foto";
   $("foto-miniatura").hidden = !esFoto;
   if (esFoto) $("foto-miniatura").src = adjunto.miniatura;
-  $("adjunto-texto").textContent = esFoto ? "Foto lista para mandar" : `📄 ${adjunto.nombre} (${tamanoLindo(adjunto.tam)})`
-    + (adjunto.grande ? ": muy grande para leerlo, pero se lo paso a la PC" : "");
+  $("adjunto-texto").textContent = "";
+  if (esFoto) $("adjunto-texto").textContent = "Foto lista para mandar";
+  else {
+    $("adjunto-texto").appendChild(tarjetaArchivo(adjunto.nombre, {tam: adjunto.tam}));
+    if (adjunto.grande) {
+      const nota = document.createElement("small");
+      nota.className = "adjunto-nota";
+      nota.textContent = "Muy grande para leerlo, pero se lo paso a la PC";
+      $("adjunto-texto").appendChild(nota);
+    }
+  }
   $("foto-lista").hidden = false;
   $("adjunto-pc").hidden = !tienePc();
   ajustarCaja();
@@ -3567,6 +3998,7 @@ function llenarVoces() {
 
 function abrirAjustes() {
   llenarVoces();
+  pintarEstadoVoz();
   $("ajuste-leer").value = ajustes.leer;
   $("ajuste-musica").value = ajustes.musica;
   $("ajuste-velocidad").value = ajustes.velocidad;
@@ -4011,6 +4443,18 @@ function conectarBotones() {
     }
   };
   // la app de Android
+  if (Nativo.hay && window.JarvisNativo.bovedaEstado) {
+    conectarBoveda();
+    conectarAlmacen();
+  }
+  $("entrenar-jarvis").onclick = () => Entrenar.abrir();
+  $("entrenar-seguir").onclick = () => (Entrenar.paso >= 2 ? Entrenar.cerrar() : Entrenar.seguir());
+  $("entrenar-cerrar").onclick = () => Entrenar.cerrar();
+  $("olvidar-voz").onclick = async () => {
+    await Nativo.cuando("entrenarJarvis", "borrar");
+    pintarEstadoVoz();
+    avisar("Listo, olvidé tu voz: vuelve a usar la sensibilidad de arriba.");
+  };
   $("ajuste-asistente").onclick = () => {
     window.JarvisNativo.ajustes("asistente");
     avisar("Elegí JARVIS en «App de asistente digital». Después, mantener apretado inicio (o encendido) abre JARVIS escuchando.", 9);
