@@ -15,7 +15,7 @@
 // ============================================================
 "use strict";
 
-const VERSION_APP = "2026.10.31.5";
+const VERSION_APP = "2026.11.01.1";
 const ANDROID_WEB = "https://rusty576.github.io/jarvis-celular/android/";   // el APK y su version.json
 const $ = (id) => document.getElementById(id);
 const Reco = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -100,6 +100,13 @@ let ultimaCharla = leerGuardado("ultimaCharla", null); // el último mensaje de 
 let datosDia = leerGuardado("dia", null);              // lo último de «Mi día» y la PC (se ve aunque no haya internet)
 let cola = leerGuardado("cola", []);                   // lo que pediste sin internet: sale solo cuando vuelve
 let vistaActual = "inicio";
+// (la Memoria: arriba, porque arrancar() corre antes de llegar a su sección)
+let memoria = leerGuardado("memoria", null);   // lo último que vino del bot (se ve aunque no haya internet)
+let memRed = null;
+let memElegido = null;
+let memAnimando = false;
+const MEM_COLOR = {datos: "#29d9ff", personas: "#ff7aa8", estudio: "#7ab8ff", gustos: "#4dffb8", salud: "#ff8a6a",
+                   otros: "#b8c4d0", instrucciones: "#c58bff"};
 let ultimoToque = 0;   // el celular solo deja abrir otra app justo después de que tocaste algo
 let ultimoPedido = 0;  // cuándo se le habló al bot por última vez (para despertarlo antes de que le hables)
 
@@ -3707,6 +3714,7 @@ const ICONOS = {
   pc: '<rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/>',
   almacen: '<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>',
   finanzas: '<rect x="3" y="6" width="18" height="13" rx="2.5"/><path d="M3 10h18M15.5 14.5h2.5"/>',
+  memoria: '<circle cx="12" cy="12" r="2.2"/><circle cx="5" cy="6" r="1.6"/><circle cx="19" cy="6" r="1.6"/><circle cx="5" cy="18" r="1.6"/><circle cx="19" cy="18" r="1.6"/><path d="M6.3 7l4 3.6M17.7 7l-4 3.6M6.3 17l4-3.6M17.7 17l-4-3.6"/>',
   boveda: '<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/>',
   juego: '<rect x="2" y="7" width="20" height="11" rx="5"/><path d="M7 10v4M5 12h4M15 11h.01M18 13h.01"/>',
 };
@@ -3724,6 +3732,7 @@ const PROTOCOLOS = [
   {id: "imagen", nombre: "Crear imagen", hacer: () => preguntarYHacer("¿Qué imagen te hago?", (t) => "Haceme una imagen de " + t)},
   {id: "fotos", nombre: "Buscar fotos", hacer: () => preguntarYHacer("¿De qué querés ver fotos?", (t) => "Mostrame fotos de " + t)},
   {id: "finanzas", nombre: "Finanzas", hacer: () => cambiarVista("finanzas")},
+  {id: "memoria", nombre: "Memoria", hacer: () => cambiarVista("memoria")},
   {id: "almacen", nombre: "Almacenamiento", soloNativa: true, hacer: () => cambiarVista("almacen")},
   {id: "boveda", nombre: "Bóveda", soloNativa: true, hacer: () => cambiarVista("boveda")},
   {id: "captura", nombre: "Captura PC", soloPc: true, hacer: () => ordenParaLaPc("Sacá una captura de pantalla")},
@@ -4572,6 +4581,7 @@ function cambiarVista(nombre) {
   else if (nombre === "almacen") pintarAlmacen(false);
   else if (nombre === "boveda") pintarBoveda();
   else if (nombre === "finanzas") { pintarFinanzas(); cargarDatos(); }
+  else if (nombre === "memoria") { pintarMemoria(); cargarMemoria(); }
 }
 
 function llenarVoces() {
@@ -4917,6 +4927,7 @@ function conectarBotones() {
   $("actualizar-mails").onclick = cargarMails;
 
   prepararFinanzas();
+  prepararMemoria();
   $("nuevo-pendiente").addEventListener("submit", (e) => {
     e.preventDefault();
     const texto = $("caja-pendiente").value.trim();
@@ -5404,6 +5415,297 @@ function prepararFinanzas() {
       $("fin-cuenta-nombre").value = $("fin-cuenta-saldo").value = "";
       $("fin-cuenta").closest("details").open = false;
     }
+  });
+}
+// ---------- Memoria (jarv2): la red de recuerdos y lo que hay que revisar, igual que en la PC ----------
+// Lo que contás de pasada queda «para revisar» (no lo uso hasta que lo guardás); lo que aprendí solo lleva ★ y se
+// confirma. Todo pasa por el bot y la PC lo aplica a su memoria: es la misma en los dos lados.
+
+async function cargarMemoria() {
+  if (!conexion || !hayInternet()) return pintarMemoria();
+  try {
+    const r = await apiLeer("app_memoria");
+    if (r && r.ok) {
+      memoria = r;
+      guardar("memoria", memoria);
+    }
+  } catch (e) { /* queda lo guardado */ }
+  pintarMemoria();
+}
+
+async function memHacer(datos, aviso) {
+  if (!conexion) return avisar("Conectá la app con el bot (/app en Telegram) para usar la memoria.", 4);
+  if (!hayInternet()) return avisar("Sin internet no puedo cambiar la memoria. Probá cuando vuelva.", 4);
+  try {
+    const r = await api("app_memoria_hacer", datos, 40);
+    if (!r.ok) throw new Error(r.error || "No pude.");
+    memoria = r;
+    guardar("memoria", memoria);
+    memElegido = null;
+    pintarMemoria();
+    if (aviso) avisar(aviso, 2.5);
+    return true;
+  } catch (e) {
+    avisar(e.message || "No pude.", 4);
+    return false;
+  }
+}
+
+function pintarMemoria() {
+  const m = memoria;
+  if (!m) {
+    $("mem-resumen").textContent = conexion ? "Cargando…" : "Conectá la app con el bot (/app en Telegram) para ver tu memoria.";
+    ["mem-revisar", "mem-lista"].forEach((id) => ($(id).innerHTML = ""));
+    memRed = null;
+    return;
+  }
+  const aprendidos = m.recuerdos.filter((r) => r.auto).length;
+  $("mem-resumen").innerHTML = `<b>${m.recuerdos.length}</b> recuerdos · <b>${aprendidos}</b> aprendidos solos · `
+    + `<b>${m.candidatos.length}</b> para revisar`;
+  memRed = memConstruirRed(m);
+  if (!memAnimando && vistaActual === "memoria") {   // (si la memoria llegó después de abrir el apartado)
+    memAnimando = true;
+    requestAnimationFrame(memDibujar);
+  }
+  memDetalle();
+
+  // para revisar: lo que dijiste de pasada y lo que aprendí solo sin que lo confirmes
+  const revisar = $("mem-revisar");
+  revisar.innerHTML = "";
+  const sinConfirmar = m.recuerdos.filter((r) => r.auto);
+  $("mem-revisar-titulo").hidden = !m.candidatos.length && !sinConfirmar.length;
+  m.candidatos.slice().reverse().forEach((k) => {
+    revisar.appendChild(memFila(k.texto, `lo dijiste ${k.veces === 1 ? "una vez" : k.veces + " veces"} · todavía no lo uso`,
+      "Guardar", () => memHacer({que: "aprobar", texto: k.texto}, "Guardado."),
+      () => memHacer({que: "descartar", texto: k.texto}, "Listo, no lo guardo."), "candidato"));
+  });
+  sinConfirmar.forEach((r) => {
+    revisar.appendChild(memFila("★ " + r.texto, "lo aprendí solo · ¿es así?", "Sí",
+      () => memHacer({que: "confirmar", id: r.id}, "Confirmado."),
+      () => { if (confirm(`¿Me olvido de «${r.texto}»?`)) memHacer({que: "olvidar", id: r.id}, "Listo, me olvidé."); }));
+  });
+
+  // la lista, por categoría (con el buscador)
+  const q = $("mem-buscar").value.trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  const plano = (t) => String(t).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  const lista = $("mem-lista");
+  lista.innerHTML = "";
+  const filtrados = m.recuerdos.filter((r) => !q || q.split(/\s+/).every((p) => plano(r.texto + " " + (m.categorias[r.categoria] || "")).includes(p)));
+  if (!filtrados.length) {
+    lista.innerHTML = `<div class="vacio">${q ? "No encontré nada con eso." : "Todavía no hay recuerdos. Escribí uno arriba o decime «acordate que…»."}</div>`;
+  }
+  Object.keys(m.categorias).forEach((cat) => {
+    const deEsta = filtrados.filter((r) => r.categoria === cat);
+    if (!deEsta.length) return;
+    const titulo = document.createElement("div");
+    titulo.className = "mem-cat";
+    titulo.style.color = MEM_COLOR[cat] || "#b8c4d0";
+    titulo.textContent = m.categorias[cat].toUpperCase() + " · " + deEsta.length;
+    lista.appendChild(titulo);
+    deEsta.forEach((r) => {
+      lista.appendChild(memFila((r.auto ? "★ " : "") + r.texto, r.confianza === "confirmado" ? "✓ confirmado por vos" : r.fecha || "",
+        null, null, () => { if (confirm(`¿Me olvido de «${r.texto}»?`)) memHacer({que: "olvidar", id: r.id}, "Listo, me olvidé."); }));
+    });
+  });
+}
+
+function memFila(texto, abajo, si, alSi, alBorrar, clase) {
+  const item = document.createElement("div");
+  item.className = "item mem-fila" + (clase ? " " + clase : "");
+  item.innerHTML = `<span class="texto">${escapar(texto)}<span class="para">${escapar(abajo || "")}</span></span>`;
+  if (si) {
+    const b = document.createElement("button");
+    b.className = "boton chico";
+    b.textContent = si;
+    b.onclick = alSi;
+    item.appendChild(b);
+  }
+  if (alBorrar) {
+    const borrar = document.createElement("button");
+    borrar.className = "borrar";
+    borrar.setAttribute("aria-label", si ? "No lo guardes" : "Olvidar");
+    borrar.innerHTML = si ? '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>'
+      : '<svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/></svg>';
+    borrar.onclick = alBorrar;
+    item.appendChild(borrar);
+  }
+  return item;
+}
+
+// La red: VOS en el centro, las categorías alrededor, cada recuerdo en abanico, líneas finas entre los que comparten
+// palabras, y lo que está para revisar como puntos punteados en el borde. Se toca un punto para verlo.
+function memConstruirRed(m) {
+  const nodos = [{tipo: "centro", texto: "VOS", color: "#ffffff", ax: 0, ay: 0, r: 17, fase: 0}];
+  const aristas = [];
+  const cats = Object.keys(m.categorias).filter((c) => m.recuerdos.some((r) => r.categoria === c));
+  cats.forEach((cat, i) => {
+    const ang = -Math.PI / 2 + (i / cats.length) * Math.PI * 2;
+    nodos.push({tipo: "categoria", cat, texto: m.categorias[cat], color: MEM_COLOR[cat] || "#b8c4d0", ang,
+                corto: {datos: "DATOS", instrucciones: "REGLAS"}[cat] || cat.toUpperCase(),
+                ax: Math.cos(ang) * 0.36, ay: Math.sin(ang) * 0.36, r: 9, fase: Math.random() * 6});
+    aristas.push([0, nodos.length - 1]);
+    const iCat = nodos.length - 1;
+    const propios = m.recuerdos.filter((r) => r.categoria === cat);
+    propios.forEach((rec, j) => {
+      const abanico = Math.min(1.3, 0.3 * propios.length);
+      const a2 = ang + (propios.length > 1 ? (j / (propios.length - 1) - 0.5) * abanico : 0);
+      const dist = 0.64 + (j % 2) * 0.1;
+      nodos.push({tipo: "recuerdo", rec, texto: rec.texto, color: rec.auto ? "#ffb547" : MEM_COLOR[cat] || "#b8c4d0",
+                  ax: Math.cos(a2) * dist, ay: Math.sin(a2) * dist, r: 5, fase: Math.random() * 6});
+      aristas.push([iCat, nodos.length - 1]);
+    });
+  });
+  m.candidatos.forEach((k, i) => {
+    const a3 = -Math.PI / 2 + ((i + 0.5) / m.candidatos.length) * Math.PI * 2;
+    nodos.push({tipo: "candidato", cand: k, texto: k.texto, color: "#8fa3b3", ax: Math.cos(a3) * 0.93, ay: Math.sin(a3) * 0.93,
+                r: 4, fase: Math.random() * 6});
+  });
+  const palabras = (t) => new Set(String(t).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .split(/[^a-z0-9]+/).filter((p) => p.length > 4).map((p) => p.slice(0, 5)));
+  const recs = nodos.map((n, i) => [n, i]).filter(([n]) => n.tipo === "recuerdo");
+  recs.forEach(([a, i], k) => {
+    const pa = palabras(a.texto);
+    recs.slice(k + 1).forEach(([b, j]) => { if ([...palabras(b.texto)].some((p) => pa.has(p))) aristas.push([i, j, true]); });
+  });
+  return {nodos, aristas, pulsos: [], pos: []};
+}
+
+function memDibujar(ms) {
+  if (!memRed || vistaActual !== "memoria") {
+    memAnimando = false;
+    return;
+  }
+  memAnimando = true;
+  requestAnimationFrame(memDibujar);
+  const lienzo = $("mem-red");
+  const caja = lienzo.getBoundingClientRect();
+  if (!caja.width) return;
+  const dpr = window.devicePixelRatio || 1;
+  if (lienzo.width !== Math.round(caja.width * dpr)) {
+    lienzo.width = Math.round(caja.width * dpr);
+    lienzo.height = Math.round(caja.height * dpr);
+  }
+  const c = lienzo.getContext("2d");
+  const w = caja.width, h = caja.height, t = ms / 1000;
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  c.clearRect(0, 0, w, h);
+  const escala = Math.min(w, h) * 0.5 * 0.86;
+  const pos = memRed.nodos.map((n) => {
+    const flota = n.tipo === "centro" ? 0 : 3;
+    return [w / 2 + n.ax * escala + Math.sin(t * 0.8 + n.fase) * flota, h / 2 + n.ay * escala + Math.cos(t * 0.6 + n.fase) * flota];
+  });
+  memRed.pos = pos;
+  memRed.aristas.forEach(([a, b, cruzada]) => {
+    const activa = memElegido !== null && (a === memElegido || b === memElegido);
+    c.beginPath();
+    c.moveTo(pos[a][0], pos[a][1]);
+    if (cruzada) c.quadraticCurveTo(w / 2, h / 2, pos[b][0], pos[b][1]);
+    else c.lineTo(pos[b][0], pos[b][1]);
+    c.strokeStyle = cruzada ? (activa ? "rgba(255,181,71,0.6)" : "rgba(255,181,71,0.12)")
+      : (activa ? "rgba(122,233,255,0.85)" : "rgba(41,217,255,0.2)");
+    c.lineWidth = activa ? 1.8 : 1;
+    c.stroke();
+  });
+  if (Math.random() < 0.1 && memRed.aristas.length) {   // impulsos que viajan por las conexiones
+    memRed.pulsos.push({a: memRed.aristas[Math.floor(Math.random() * memRed.aristas.length)], p: 0, v: 0.6 + Math.random() * 0.8});
+  }
+  memRed.pulsos = memRed.pulsos.filter((pu) => (pu.p += pu.v / 60) < 1);
+  memRed.pulsos.forEach((pu) => {
+    const [a, b, cruzada] = pu.a, q = pu.p;
+    const x = cruzada ? (1 - q) * (1 - q) * pos[a][0] + 2 * (1 - q) * q * w / 2 + q * q * pos[b][0] : pos[a][0] + (pos[b][0] - pos[a][0]) * q;
+    const y = cruzada ? (1 - q) * (1 - q) * pos[a][1] + 2 * (1 - q) * q * h / 2 + q * q * pos[b][1] : pos[a][1] + (pos[b][1] - pos[a][1]) * q;
+    c.beginPath();
+    c.arc(x, y, 2, 0, Math.PI * 2);
+    c.fillStyle = cruzada ? "rgba(255,200,110,0.95)" : "rgba(170,240,255,0.95)";
+    c.fill();
+  });
+  memRed.nodos.forEach((n, i) => {
+    const [x, y] = pos[i];
+    const elegido = i === memElegido;
+    const radio = n.r * (n.tipo === "centro" ? 1 + 0.06 * Math.sin(t * 2.2) : 1) * (elegido ? 1.4 : 1);
+    const brillo = c.createRadialGradient(x, y, 0, x, y, radio * 2.6);
+    brillo.addColorStop(0, n.color + "99");
+    brillo.addColorStop(1, n.color + "00");
+    c.fillStyle = brillo;
+    c.beginPath();
+    c.arc(x, y, radio * 2.6, 0, Math.PI * 2);
+    c.fill();
+    c.beginPath();
+    c.arc(x, y, radio, 0, Math.PI * 2);
+    c.fillStyle = n.tipo === "recuerdo" || n.tipo === "candidato" ? "#000" : n.color;
+    c.fill();
+    c.lineWidth = elegido ? 2.2 : 1.4;
+    c.strokeStyle = n.color;
+    if (n.tipo === "candidato") c.setLineDash([2, 3]);
+    c.stroke();
+    c.setLineDash([]);
+    if (n.tipo === "centro") {
+      c.font = "700 10px Orbitron, sans-serif";
+      c.textAlign = "center";
+      c.fillStyle = "#02121c";
+      c.fillText("VOS", x, y + 3.5);
+    } else if (n.tipo === "categoria") {
+      // el nombre corto, al costado de la línea (los recuerdos salen hacia afuera: así no se pisan)
+      const horizontal = Math.abs(Math.cos(n.ang)) > Math.abs(Math.sin(n.ang));
+      c.font = "700 9px Orbitron, sans-serif";
+      c.textAlign = horizontal ? "center" : "left";
+      c.fillStyle = "#d4f3ff";
+      c.fillText(n.corto, horizontal ? x : x + radio + 6, horizontal ? y + radio + 13 : y + 3);
+    }
+  });
+}
+
+function memNodoEn(e) {
+  if (!memRed || !memRed.pos.length) return null;
+  const caja = $("mem-red").getBoundingClientRect();
+  const x = e.clientX - caja.left, y = e.clientY - caja.top;
+  let mejor = null, dist = 1e9;
+  memRed.pos.forEach(([nx, ny], i) => {
+    const d = Math.hypot(nx - x, ny - y);
+    if (d < memRed.nodos[i].r + 16 && d < dist) { mejor = i; dist = d; }   // (dedos: se acepta tocar cerca)
+  });
+  return mejor;
+}
+
+function memDetalle() {
+  const caja = $("mem-detalle");
+  const n = memRed && memElegido !== null ? memRed.nodos[memElegido] : null;
+  caja.innerHTML = "";
+  if (!n || n.tipo === "centro") {
+    caja.innerHTML = '<span class="mem-ayuda">Tocá un punto para ver el recuerdo. <i class="mem-punto"></i> me lo pediste · '
+      + '<i class="mem-punto auto"></i> lo aprendí solo · <i class="mem-punto candidato"></i> ¿lo guardo?</span>';
+    return;
+  }
+  if (n.tipo === "categoria") {
+    const hijos = memRed.nodos.filter((x) => x.tipo === "recuerdo" && x.rec.categoria === n.cat);
+    caja.innerHTML = `<b style="color:${n.color}">${escapar(n.texto.toUpperCase())}</b>`
+      + hijos.map((x) => `<span class="mem-hijo">${x.rec.auto ? "★ " : ""}${escapar(x.texto)}</span>`).join("");
+    return;
+  }
+  if (n.tipo === "candidato") {
+    caja.appendChild(memFila(n.texto, "para revisar · todavía no lo uso", "Guardar",
+      () => memHacer({que: "aprobar", texto: n.cand.texto}, "Guardado."),
+      () => memHacer({que: "descartar", texto: n.cand.texto}, "Listo, no lo guardo."), "candidato"));
+    return;
+  }
+  const r = n.rec;
+  caja.appendChild(memFila((r.auto ? "★ " : "") + r.texto, r.auto ? "lo aprendí solo · ¿es así?"
+    : r.confianza === "confirmado" ? "✓ confirmado por vos" : (memoria.categorias[r.categoria] || "") + (r.fecha ? " · desde " + r.fecha : ""),
+    r.auto ? "Sí" : null, r.auto ? () => memHacer({que: "confirmar", id: r.id}, "Confirmado.") : null,
+    () => { if (confirm(`¿Me olvido de «${r.texto}»?`)) memHacer({que: "olvidar", id: r.id}, "Listo, me olvidé."); }));
+}
+
+function prepararMemoria() {
+  $("mem-red").addEventListener("click", (e) => {
+    memElegido = memNodoEn(e);
+    memDetalle();
+  });
+  $("mem-buscar").addEventListener("input", pintarMemoria);
+  $("mem-nuevo").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const texto = $("mem-nuevo-texto").value.trim();
+    if (!texto) return;
+    if (await memHacer({que: "guardar", texto: texto}, "Guardado. Lo sé acá y en la PC.")) $("mem-nuevo-texto").value = "";
   });
 }
 // ---------- Varios chats, como en Claude ----------
