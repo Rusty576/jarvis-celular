@@ -86,6 +86,16 @@
 
   <!-- Charla -->
   <section id="vista-charla" class="vista">
+    <!-- como en Claude: tus chats, el título del que estás viendo y uno nuevo -->
+    <div class="chat-barra">
+      <button type="button" id="abrir-chats" class="icono-boton chico" aria-label="Tus chats">
+        <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/></svg><i class="chat-novedad" id="chats-novedad" hidden></i>
+      </button>
+      <button type="button" id="chat-titulo" class="chat-titulo">Principal</button>
+      <button type="button" id="chat-nuevo" class="icono-boton chico" aria-label="Chat nuevo">
+        <svg viewBox="0 0 24 24"><path d="M11 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5"/><path d="M18.4 3.6a2 2 0 0 1 2.8 2.8L12 15.6l-3.6.8.8-3.6z"/></svg>
+      </button>
+    </div>
     <div id="mensajes" class="mensajes"></div>
     <div id="foto-lista" class="foto-lista" hidden>
       <img id="foto-miniatura" alt="">
@@ -283,6 +293,22 @@
     </div>
   </section>
 </main>
+
+<!-- Tus chats (entra desde la izquierda, como en Claude) -->
+<div id="chats-velo" class="chats-velo"></div>
+<aside id="chats-cajon" class="chats-cajon" aria-label="Tus chats" aria-hidden="true">
+  <div class="chats-cabeza">
+    <b>CHATS</b>
+    <button type="button" id="cerrar-chats" class="icono-boton chico" aria-label="Cerrar">
+      <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+  </div>
+  <button type="button" id="cajon-nuevo" class="boton principal chats-nuevo">
+    <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Chat nuevo
+  </button>
+  <input id="chats-buscar" class="chats-buscar" placeholder="Buscar en tus chats" autocomplete="off" enterkeyhint="search">
+  <div id="chats-lista" class="chats-lista"></div>
+</aside>
 
 <!-- La barra de abajo, como la de Android: un ícono con su pastilla por pestaña. (Llamar está en la charla, al lado del
      micrófono) -->

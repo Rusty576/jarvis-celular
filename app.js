@@ -15,7 +15,7 @@
 // ============================================================
 "use strict";
 
-const VERSION_APP = "2026.10.31.3";
+const VERSION_APP = "2026.10.31.5";
 const ANDROID_WEB = "https://rusty576.github.io/jarvis-celular/android/";   // el APK y su version.json
 const $ = (id) => document.getElementById(id);
 const Reco = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -88,7 +88,14 @@ const ajustes = Object.assign({leer: "auto", nombreVoz: "", velocidad: 1.05, idi
                                escucharJarvis: false, avisos: true, modelo: "", soloWifi: true},
                               leerGuardado("ajustes", {}));
 let conexion = leerGuardado("conexion", null);         // {u: la dirección del bot, k: la llave}
-let mensajes = leerGuardado("mensajes", []);           // la charla, como se ve en este celular
+let chats = leerGuardado("chats", null) || [{id: "principal", titulo: "", creado: Date.now(), actualizado: Date.now()}];
+if (!chats.some((c) => c.id === "principal")) chats.unshift({id: "principal", titulo: "", creado: Date.now(), actualizado: Date.now()});
+let chatActual = chats.some((c) => c.id === leerGuardado("chatActual", "principal")) ? leerGuardado("chatActual", "principal") : "principal";
+let mensajes = leerGuardado(claveChat(chatActual), []);   // el chat que se ve (cada chat se guarda aparte)
+let fueraDeVista = false;   // agregando a un chat que no es el que se ve (se guarda, no se dibuja)
+const RE_ITEM = /^(\s*)([-*•+]|\d+[.)])\s+(.*)$/;
+const esFilaTabla = (l) => /^\s*\|.*\|\s*$/.test(l || "");
+const esSeparadorTabla = (l) => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(l || "");
 let ultimaCharla = leerGuardado("ultimaCharla", null); // el último mensaje de la charla del bot que ya está acá
 let datosDia = leerGuardado("dia", null);              // lo último de «Mi día» y la PC (se ve aunque no haya internet)
 let cola = leerGuardado("cola", []);                   // lo que pediste sin internet: sale solo cuando vuelve
@@ -244,8 +251,9 @@ async function mandarCola() {
         const respuesta = r.ok ? (r.mensajes || []).join("\n\n") : (r.error || "No pude.");
         const imagenes = await prepararImagenes(r.acciones || []);
         // (la respuesta tal cual, con la pregunta aparte: así, cuando llega la charla de Telegram, no se repite)
-        agregar({quien: "jarvis", texto: respuesta, deCola: String(p.datos.texto).slice(0, 80), tarjetas: r.tarjetas || [],
-                 acciones: r.acciones || [], imagenes: imagenes.length ? imagenes : undefined});
+        enChat((p.datos && p.datos.chat) || "principal", () => agregar({quien: "jarvis", texto: respuesta,
+          deCola: String(p.datos.texto).slice(0, 80), tarjetas: r.tarjetas || [], acciones: r.acciones || [],
+          imagenes: imagenes.length ? imagenes : undefined}));
         if (r.acciones && r.acciones.length) await hacerAcciones(r.acciones);
       } else if (r.ok && r.pendientes) {
         datosDia = r;
@@ -1654,7 +1662,7 @@ async function contestarEnElCelular(texto, opciones) {
     if (burbuja) {   // (lo que quedó a medias, roto, no se queda en la charla)
       burbuja.closest(".msg").remove();
       mensajes.pop();
-      guardar("mensajes", mensajes);
+      guardarCharla(true);
     }
     const aviso = r.error === "basura"
       ? "El cerebro del celular no pudo armar una respuesta que se entienda. Probá preguntarlo de otra forma."
@@ -1665,7 +1673,8 @@ async function contestarEnElCelular(texto, opciones) {
   if (!burbuja) agregar({quien: "jarvis", texto: respuesta, local: true});
   else {
     mensajes[mensajes.length - 1].texto = respuesta;
-    guardar("mensajes", mensajes);
+    guardarCharla(true);
+    redibujar(mensajes[mensajes.length - 1]);   // (con formato, ahora que está entera)
   }
   if (voz) await voz.terminar();
   else if (!opciones.sinVoz && !opciones.llamada && (ajustes.leer === "siempre" || (ajustes.leer === "auto" && opciones.porVoz))) {
@@ -2121,12 +2130,14 @@ function pintarMensaje(m, indice) {
   const div = document.createElement("div");
   div.className = "msg " + m.quien + (m.local ? " local" : "") + (m.aviso ? " de-aviso" : "");
   divDe.set(m, div);
-  if (m.quien !== "aviso") {
+  if (m.en) div.title = horaLinda(new Date(m.en));
+  // como en Claude: sin «VOS» ni «JARVIS» arriba de cada mensaje; solo una etiqueta chica cuando dice algo
+  if (m.quien === "jarvis" && (m.local || m.aviso || m.ia)) {
     const quien = document.createElement("span");
-    quien.className = "quien";
-    quien.textContent = m.quien === "vos" ? "VOS" : m.local ? "JARVIS · SIN INTERNET"
-      : m.aviso ? "🔔 JARVIS · " + (ETIQUETA_AVISO[m.aviso] || "AVISO") : m.ia ? "JARVIS · CON " + m.ia.toUpperCase() : "JARVIS";
-    if (m.en) {
+    quien.className = "quien etiqueta";
+    quien.textContent = m.local ? "Sin internet · cerebro del celular"
+      : m.aviso ? "🔔 " + (ETIQUETA_AVISO[m.aviso] || "AVISO") : "Con " + m.ia;
+    if (m.en && m.aviso) {
       const hora = document.createElement("time");
       hora.textContent = horaLinda(new Date(m.en));
       quien.appendChild(hora);
@@ -2140,8 +2151,8 @@ function pintarMensaje(m, indice) {
     div.appendChild(deCola);
   }
   const texto = document.createElement("span");
-  texto.className = "texto-msg";
-  texto.innerHTML = conFormato(m.texto || "");
+  texto.className = "texto-msg" + (m.quien === "jarvis" ? " md" : "");
+  texto.innerHTML = m.quien === "jarvis" ? markdown(m.texto || "") : m.quien === "vos" ? textoPlano(m.texto || "") : conFormato(m.texto || "");
   div.appendChild(texto);
   if (m.imagen) {   // (una foto que mandaste)
     const img = document.createElement("img");
@@ -2178,6 +2189,17 @@ function pintarMensaje(m, indice) {
   (m.tarjetas || []).forEach((t, i) => div.appendChild(pintarTarjeta(t, indice, i)));
   if (m.pensado) div.insertBefore(pintarPensado(m.pensado), texto);
   if ((m.quien === "vos" || m.quien === "jarvis") && (m.texto || "").trim()) div.appendChild(botonesDelMensaje(m));
+  if (m.quien === "vos") {
+    // tu mensaje: la burbuja, y abajo (al tocarla) Copiar y Editar
+    const globo = document.createElement("div");
+    globo.className = "globo";
+    [...div.children].forEach((x) => { if (!x.classList.contains("msg-botones")) globo.appendChild(x); });
+    div.prepend(globo);
+    globo.onclick = (e) => {
+      if (String(window.getSelection ? window.getSelection() : "") || e.target.closest("a, button, img")) return;
+      div.classList.toggle("ver-acciones");
+    };
+  }
   return div;
 }
 
@@ -2226,9 +2248,11 @@ function pintarPensado(p) {
 
 const ICONO_COPIAR = '<svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>';
 const ICONO_LISTO = '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+const ICONO_REINTENTAR = '<svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.7"/><path d="M20 4v5h-5"/></svg>';
 const ICONO_EDITAR = '<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg>';
 
 function botonesDelMensaje(m) {
+  // como en Claude: abajo de la respuesta, Copiar (y Reintentar en la última); abajo de lo tuyo, Copiar y Editar
   const fila = document.createElement("div");
   fila.className = "msg-botones";
   const boton = (icono, nombre, hacer) => {
@@ -2244,12 +2268,15 @@ function botonesDelMensaje(m) {
   };
   boton(ICONO_COPIAR, "Copiar", async (b) => {
     if (!(await copiarTexto(m.texto))) return avisar("No pude copiarlo.");
-    b.innerHTML = ICONO_LISTO;
+    b.innerHTML = ICONO_LISTO + '<span class="msg-boton-texto" aria-live="polite">Copiado</span>';
     b.classList.add("hecho");
     setTimeout(() => { b.innerHTML = ICONO_COPIAR; b.classList.remove("hecho"); }, 1600);
   });
   if (m.quien === "vos" && !m.imagen && !m.archivo && !(m.archivos || []).length) {
     boton(ICONO_EDITAR, "Editar", () => editarMensaje(m));
+  }
+  if (m.quien === "jarvis" && !m.aviso && mensajes[mensajes.length - 1] === m) {
+    boton(ICONO_REINTENTAR, "Reintentar", () => reintentar(m));
   }
   return fila;
 }
@@ -2365,7 +2392,7 @@ function pintarTarjeta(t, indiceMensaje, indiceTarjeta) {
   const responder = async (confirmar) => {
     si.disabled = no.disabled = true;
     try {
-      const r = await api("app_confirmar", {id: t.id, si: confirmar});
+      const r = await api("app_confirmar", {id: t.id, si: confirmar, chat: chatParaBot()});
       t.resultado = (r.mensajes || []).join(" ") || (confirmar ? "Hecho." : "Cancelado.");
     } catch (e) {
       si.disabled = no.disabled = false;
@@ -2373,7 +2400,7 @@ function pintarTarjeta(t, indiceMensaje, indiceTarjeta) {
       return;
     }
     if (mensajes[indiceMensaje] && mensajes[indiceMensaje].tarjetas) mensajes[indiceMensaje].tarjetas[indiceTarjeta] = t;
-    guardar("mensajes", mensajes);
+    guardarCharla(true);
     caja.replaceWith(pintarTarjeta(t, indiceMensaje, indiceTarjeta));
     if (llamada.activa || vistaActual === "inicio") Voz.decir(t.resultado);
   };
@@ -2432,9 +2459,19 @@ function botonAnteriores() {
 
 function agregar(m) {
   m.en = m.en || Date.now();
+  if (fueraDeVista) {   // (es para otro chat: se guarda ahí, no se dibuja acá)
+    mensajes.push(m);
+    if (mensajes.length > 150) mensajes = mensajes.slice(-150);
+    return m;
+  }
+  const anterior = mensajes[mensajes.length - 1];
   mensajes.push(m);
   if (mensajes.length > 150) mensajes = mensajes.slice(-150);
   guardarCharla();
+  if (anterior && anterior.quien === "jarvis") {   // (Reintentar queda solo en la última respuesta)
+    const boton = divDe.get(anterior) && divDe.get(anterior).querySelector('.msg-boton[aria-label="Reintentar"]');
+    if (boton) boton.remove();
+  }
   if (burbuja.activa) {
     burbuja.charlaSucia = true;
     $("burbuja-charla").appendChild(pintarMensaje(m, mensajes.length - 1));
@@ -2463,14 +2500,15 @@ function guardarCharla(ya) {
   clearTimeout(guardandoCharla);
   const guardarYa = () => {
     try {
-      localStorage.setItem(GUARDADO + "mensajes", JSON.stringify(mensajes));
+      localStorage.setItem(GUARDADO + claveChat(chatActual), JSON.stringify(mensajes));
     } catch (e) {
       mensajes.slice(0, Math.floor(mensajes.length / 2)).forEach((m) => {
         delete m.imagen;
         (m.imagenes || []).forEach((im) => { im.mini = null; im.perdida = true; });
       });
-      guardar("mensajes", mensajes);
+      guardar(claveChat(chatActual), mensajes);
     }
+    tocarChat();
   };
   if (ya) guardarYa();
   else guardandoCharla = setTimeout(guardarYa, 500);
@@ -2627,7 +2665,7 @@ async function mandar(texto, opciones = {}) {
         ? "los archivos" : "la grabación")
         + ". Probá cuando vuelva." + (archivo ? " (Sin internet leo archivos de texto, no PDFs ni audios.)" : "");
     }
-    encolar({accion: "app_mensaje", datos: {texto: texto}});
+    encolar({accion: "app_mensaje", datos: {texto: texto, chat: chatParaBot()}});
     return "No hay internet. Te lo mando apenas vuelva." + (Nativo.hay && Cerebro.estado()
       ? " (Para que te conteste sin internet, bajá el cerebro del celular: Ajustes › Cerebro sin internet.)" : "");
   };
@@ -2666,8 +2704,11 @@ async function mandar(texto, opciones = {}) {
   const conCerebro = soloTexto && !creando && Nativo.hay && Cerebro.listo();
   const precalentar = conCerebro ? setTimeout(() => Cerebro.preparar(), 12000) : null;
   const esteEnvio = enCurso = {idApp: idApp, texto: texto, mio: mio, porVoz: !!opciones.porVoz, en: Date.now()};
+  const chatDelEnvio = chatActual;
+  const poner = (x) => (chatActual === chatDelEnvio ? agregar(x) : enChat(chatDelEnvio, () => agregar(x)));
   try {
     const r = await api("app_mensaje", {texto: (contexto && texto ? contexto + " " : "") + (texto || ""), id_app: idApp,
+                                         chat: chatParaBot(),
                                          quitar: opciones.quitar && opciones.quitar.length ? opciones.quitar : undefined,
                                          llamada: !!opciones.llamada, audio: opciones.audio || null,
                                          imagen: foto ? {mime: "image/jpeg", datos: foto.datos} : null,
@@ -2682,7 +2723,7 @@ async function mandar(texto, opciones = {}) {
     }
     if (r.pedido && !texto) {   // lo que entendió de la grabación, o lo que se preguntó de la foto
       mio.texto = (opciones.audio ? "🎙️ " : "") + r.pedido;
-      guardar("mensajes", mensajes);
+      guardarCharla(true);
       pintarCharla();
     }
     if (!r.ok) throw new ErrorJarvis("bot", r.error === "mensaje vacío" ? "No te escuché bien. ¿Me lo repetís?" : (r.error || "No pude."));
@@ -2696,12 +2737,12 @@ async function mandar(texto, opciones = {}) {
     const acciones = r.acciones || [];
     const imagenes = await prepararImagenes(acciones);   // (las imágenes que hizo o encontró JARVIS)
     pensando(false);
-    agregar({quien: "jarvis", texto: respuesta, tarjetas: r.tarjetas || [], acciones: acciones, idApp: idApp,
+    poner({quien: "jarvis", texto: respuesta, tarjetas: r.tarjetas || [], acciones: acciones, idApp: idApp,
              imagenes: imagenes.length ? imagenes : undefined, ia: r.ia || undefined,
              pensado: {seg: Math.round((Date.now() - pensandoDesde) / 1000), pasos: r.pasos || [], ia: r.ia || ""}});
     const problema = await hacerAcciones(acciones);   // abrir la app, llamar, la alarma...
     if (problema) {
-      agregar({quien: "aviso", texto: problema});
+      poner({quien: "aviso", texto: problema});
       respuesta = problema;   // (lo que se dice en voz alta: el problema, no «listo»)
     }
     // (si arrancó la música o el GPS en el celular, JARVIS no habla encima: queda escrito)
@@ -2721,8 +2762,8 @@ async function mandar(texto, opciones = {}) {
       return {texto: "", tarjetas: [], acciones: [], cancelado: true};
     }
     if (creando && ["tiempo", "servidor", "no_json"].includes(e.tipo)) {
-      const aviso = "Lo sigo armando (con imágenes tarda un poco): cuando esté, aparece acá en la charla.";
-      agregar({quien: "aviso", texto: "⏳ " + aviso});
+      const aviso = "Lo sigo armando (con imágenes tarda un poco): cuando esté, aparece en el chat principal.";
+      poner({quien: "aviso", texto: "⏳ " + aviso});
       [60000, 150000, 300000].forEach((ms) => setTimeout(() => sincronizarCharla().catch(() => {}), ms));
       return {texto: aviso, tarjetas: [], acciones: [], error: true};
     }
@@ -2735,7 +2776,7 @@ async function mandar(texto, opciones = {}) {
       }
     }
     const aviso = e.tipo === "sin_red" ? sinInternet() : e.message;
-    agregar({quien: "aviso", texto: (e.tipo === "sin_red" ? "⏳ " : "") + aviso});
+    poner({quien: "aviso", texto: (e.tipo === "sin_red" ? "⏳ " : "") + aviso});
     return {texto: aviso, tarjetas: [], acciones: [], error: true};
   }
 }
@@ -2748,11 +2789,11 @@ let ajustesBot = leerGuardado("ajustesBot", null);  // lo que se elige en Ajuste
 function mostrarAvisos(lista) {
   const nuevos = (lista || []).filter((a) => a.id > ultimoAviso).sort((a, b) => a.id - b.id);
   if (!nuevos.length) return;
-  nuevos.forEach((a) => {
+  enChat("principal", () => nuevos.forEach((a) => {   // (los avisos van al chat principal)
     const m = agregar({quien: "jarvis", texto: a.texto, aviso: a.tipo || "aviso", en: a.en,
                        imagenes: a.img ? [{ref: a.img, mini: null, texto: a.tipo === "pc" ? "Lo que mandó la PC" : ""}] : undefined});
-    if (m.imagenes) completarImagenes(m);
-  });
+    if (m.imagenes && !fueraDeVista) completarImagenes(m);
+  }));
   ultimoAviso = nuevos[nuevos.length - 1].id;
   guardar("ultimoAviso", ultimoAviso);
   if (vistaActual !== "charla") {
@@ -2761,7 +2802,7 @@ function mostrarAvisos(lista) {
     let texto = ultimo.texto.replace(/\n{2,}/g, "\n").trim();
     if (texto.length > 300) texto = texto.slice(0, 300).replace(/\s+\S*$/, "") + "…";
     avisar((ultimo.tipo === "pc" ? "🖥️ " : "🔔 ") + texto, Math.min(15, Math.max(6, texto.split(/\s+/).length / 3)),
-           {texto: "Ver", hacer: () => cambiarVista("charla")});
+           {texto: "Ver", hacer: () => abrirChat("principal")});
   }
 }
 
@@ -2813,6 +2854,10 @@ async function sincronizarCharla(datos) {
   } catch (e) {
     return;
   }
+  enChat("principal", () => aplicarCharlaSincronizada(d));   // (lo de Telegram y la PC va al chat principal)
+}
+
+function aplicarCharlaSincronizada(d) {
   const firma = (m) => m.r + "|" + m.t;
   const charla = (d.charla || []).filter((m) => !/^\(Toc[oó] (Confirmar|Cancelar)\.\)$/.test(m.t)
                                                  && m.t !== "(Te pedí confirmación con un botón.)");
@@ -2844,7 +2889,7 @@ async function sincronizarCharla(datos) {
     // (las imágenes de ese mensaje —una de Telegram, la captura de la PC— se traen del bot)
     const nuevo = agregar({quien: quien, texto: texto, sincronizado: true,
                            imagenes: (m.img || []).length ? m.img.map((id) => ({ref: id, mini: null})) : undefined});
-    if (nuevo.imagenes) completarImagenes(nuevo);
+    if (nuevo.imagenes && !fueraDeVista) completarImagenes(nuevo);
   });
   if (charla.length) {
     ultimaCharla = firma(charla[charla.length - 1]);
@@ -4713,6 +4758,7 @@ const sinOidoSinInternet = (r) => Nativo.hay && !hayInternet() && ["network", "l
 window.JarvisApp = {
   atras() {
     // El botón atrás de Android: true si la app lo usó (si no, la app queda abierta por detrás)
+    if (chatsAbierto()) { cerrarChats(); return true; }
     if (!$("visor").hidden) { cerrarVisor(); return true; }
     if ($("ajustes").open) { $("ajustes").close(); return true; }
     if (llamada.activa) { colgar(); return true; }
@@ -4976,6 +5022,8 @@ function conectarBotones() {
   $("desconectar").onclick = () => {
     if (!confirm("¿Desconecto este celular de este JARVIS? Para volver a conectarlo, mandá /app en Telegram.")) return;
     ["conexion", "mensajes", "ultimaCharla", "dia", "cola"].forEach((c) => localStorage.removeItem(GUARDADO + c));
+    chats.forEach((c) => localStorage.removeItem(GUARDADO + claveChat(c.id)));
+    ["chats", "chatActual"].forEach((c) => localStorage.removeItem(GUARDADO + c));
     conexion = null;
     $("ajustes").close();
     mostrarConectar();
@@ -5120,7 +5168,9 @@ function arrancar() {
   }
   leerLink();
   reactorInicio = crearReactor($("reactor-inicio"));
+  aplicarApariencia();   // (el fondo negro y el color, apenas arranca: también en la pantalla de conectar)
   conectarBotones();
+  prepararChats();
   pintarProtocolos();
   if (!Nativo.hay && "serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
   if (!conexion) {
@@ -5153,7 +5203,6 @@ function arrancar() {
     pintarHud();   // (la hora y lo demás de Inicio)
   }, 60000);
   pintarHud();
-  aplicarApariencia();
   if (Nativo.hay) {   // «Hey Jarvis» con la app cerrada (si estaba prendido: después de reiniciar el celular, vuelve acá)
     $("escuchar-jarvis").nextElementSibling.textContent = "Escuchar «Hey Jarvis» (también con la app cerrada)";
     // lo que dice Android manda: si lo apagaste desde la notificación o el widget, queda apagado; si lo prendiste
@@ -5356,4 +5405,397 @@ function prepararFinanzas() {
       $("fin-cuenta").closest("details").open = false;
     }
   });
+}
+// ---------- Varios chats, como en Claude ----------
+// El «principal» es el de siempre: el mismo que Telegram y lo que cuenta la PC (y donde llegan los avisos). Los demás
+// son solo de la app; el bot les guarda el contexto aparte (los últimos 6), el celular guarda todos.
+
+function claveChat(id) {
+  return id === "principal" ? "mensajes" : "mensajes_" + id;
+}
+
+function chatParaBot() {
+  return chatActual === "principal" ? undefined : chatActual;
+}
+
+function datosDelChat(id) {
+  return chats.find((c) => c.id === id);
+}
+
+function tituloDe(texto) {
+  const t = String(texto || "").replace(/^🎙️\s*/, "").replace(/\s+/g, " ").trim();
+  return t.length > 44 ? t.slice(0, 42).replace(/\s+\S*$/, "") + "…" : t;
+}
+
+function tocarChat() {
+  // lo último que pasó en este chat (para ordenarlos) y su título (el primer mensaje tuyo), como en Claude
+  const c = datosDelChat(chatActual);
+  if (!c) return;
+  if (mensajes.length) c.actualizado = Math.max(c.actualizado || 0, mensajes[mensajes.length - 1].en || 0);
+  if (!c.titulo && c.id !== "principal") {
+    const primero = mensajes.find((m) => m.quien === "vos" && (m.texto || "").trim());
+    if (primero) {
+      c.titulo = tituloDe(primero.texto);
+      if (!fueraDeVista) pintarBarraChat();
+    }
+  }
+  guardar("chats", chats);
+}
+
+
+function enChat(id, hacer) {
+  // Lo que llega para otro chat (lo de Telegram y la PC al principal, o la respuesta de un chat del que te fuiste
+  // mientras pensaba) va a ese chat, aunque estés mirando otro
+  if (id === chatActual) return hacer();
+  if (!datosDelChat(id)) return null;   // (lo borraste)
+  guardarCharla(true);
+  const vuelta = {id: chatActual, lista: mensajes};
+  chatActual = id;
+  mensajes = leerGuardado(claveChat(id), []);
+  const antes = mensajes.length;
+  fueraDeVista = true;
+  try {
+    return hacer();
+  } finally {
+    const hubo = mensajes.length !== antes;
+    if (hubo) guardarCharla(true);
+    chatActual = vuelta.id;
+    mensajes = vuelta.lista;
+    fueraDeVista = false;
+    if (hubo) $("chats-novedad").hidden = false;   // (el puntito: hay algo nuevo en otro chat)
+    pintarBarraChat();
+  }
+}
+
+function pintarBarraChat() {
+  const c = datosDelChat(chatActual) || {};
+  const titulo = $("chat-titulo");
+  titulo.textContent = chatActual === "principal" ? "Principal" : c.titulo || "Chat nuevo";
+  titulo.classList.toggle("principal", chatActual === "principal");
+  titulo.setAttribute("aria-label", "Tus chats (estás en «" + titulo.textContent + "»)");
+}
+
+function abrirChat(id) {
+  if (!datosDelChat(id)) id = "principal";
+  if (id !== chatActual) {
+    guardarCharla(true);
+    chatActual = id;
+    guardar("chatActual", chatActual);
+    mensajes = leerGuardado(claveChat(id), []);
+    ultimoAdjunto = null;   // (la foto de otro chat no sigue «a mano» acá)
+  }
+  pintarCharla();
+  pintarBarraChat();
+  cerrarChats();
+  if (vistaActual !== "charla") cambiarVista("charla");
+}
+
+function nuevoChat() {
+  // si ya estás en uno nuevo y vacío, no se hace otro (como en Claude)
+  const actual = datosDelChat(chatActual);
+  if (actual && actual.id !== "principal" && !mensajes.length) return abrirChat(actual.id);
+  const id = "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+  chats.unshift({id: id, titulo: "", creado: Date.now(), actualizado: Date.now()});
+  guardar("chats", chats);
+  abrirChat(id);
+  setTimeout(() => $("caja").focus(), 280);
+}
+
+async function borrarChat(id) {
+  const c = datosDelChat(id);
+  if (!c) return;
+  if (id === "principal") {
+    if (!confirm("¿Vacío el chat principal? (Lo de Telegram sigue en Telegram.)")) return;
+    if (chatActual === "principal") mensajes = [];
+    localStorage.removeItem(GUARDADO + claveChat(id));
+    if (chatActual === "principal") pintarCharla();
+    pintarListaChats();
+    return;
+  }
+  if (!confirm(`¿Borro el chat «${c.titulo || "Chat nuevo"}»?`)) return;
+  chats = chats.filter((x) => x.id !== id);
+  guardar("chats", chats);
+  localStorage.removeItem(GUARDADO + claveChat(id));
+  if (conexion && hayInternet()) api("app_chat_borrar", {chat: id}, 30).catch(() => {});   // (el bot suelta su contexto)
+  if (chatActual === id) {
+    chatActual = "principal";
+    guardar("chatActual", chatActual);
+    mensajes = leerGuardado(claveChat("principal"), []);
+    pintarCharla();
+    pintarBarraChat();
+  }
+  pintarListaChats();
+}
+
+function renombrarChat(id, fila) {
+  // en el lugar (sin ventanas aparte)
+  const c = datosDelChat(id);
+  if (!c || id === "principal") return;
+  const caja = document.createElement("input");
+  caja.className = "chat-renombrar";
+  caja.value = c.titulo || "";
+  caja.placeholder = "Nombre del chat";
+  caja.setAttribute("aria-label", "Nombre del chat");
+  fila.replaceChildren(caja);
+  caja.focus();
+  caja.select();
+  const listo = (guardarlo) => {
+    if (guardarlo && caja.value.trim()) {
+      c.titulo = tituloDe(caja.value);
+      guardar("chats", chats);
+      pintarBarraChat();
+    }
+    pintarListaChats();
+  };
+  caja.onkeydown = (e) => {
+    if (e.key === "Enter") listo(true);
+    if (e.key === "Escape") listo(false);
+  };
+  caja.onblur = () => listo(true);
+}
+
+function cuandoChat(ms) {
+  const d = new Date(ms || Date.now()), hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+  const dias = Math.floor((hoy - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 86400000);
+  return dias <= 0 ? "Hoy" : dias === 1 ? "Ayer" : dias < 7 ? "Últimos 7 días" : dias < 30 ? "Este mes" : "Antes";
+}
+
+function pintarListaChats() {
+  const lista = $("chats-lista");
+  const buscado = normalizar($("chats-buscar").value || "");
+  const coincide = (c) => {
+    if (!buscado) return true;
+    if (normalizar(c.titulo || (c.id === "principal" ? "principal" : "chat nuevo")).includes(buscado)) return true;
+    const suyos = c.id === chatActual ? mensajes : leerGuardado(claveChat(c.id), []);
+    return suyos.some((m) => normalizar(m.texto || "").includes(buscado));
+  };
+  const principal = datosDelChat("principal");
+  const otros = chats.filter((c) => c.id !== "principal" && coincide(c))
+    .sort((a, b) => (b.actualizado || b.creado || 0) - (a.actualizado || a.creado || 0));
+  lista.replaceChildren();
+  const fila = (c) => {
+    const caja = document.createElement("div");
+    caja.className = "chat-fila" + (c.id === chatActual ? " actual" : "");
+    const abrir = document.createElement("button");
+    abrir.type = "button";
+    abrir.className = "chat-abrir";
+    const titulo = document.createElement("b");
+    titulo.textContent = c.id === "principal" ? "Principal" : c.titulo || "Chat nuevo";
+    const sub = document.createElement("small");
+    sub.textContent = c.id === "principal" ? "También Telegram y lo que cuenta la PC"
+      : horaLinda(new Date(c.actualizado || c.creado)) + " · " + fechaCorta(c.actualizado || c.creado);
+    abrir.append(titulo, sub);
+    abrir.onclick = () => abrirChat(c.id);
+    const mas = document.createElement("button");
+    mas.type = "button";
+    mas.className = "chat-mas";
+    mas.setAttribute("aria-label", "Opciones del chat");
+    mas.textContent = "⋯";
+    caja.append(abrir, mas);
+    mas.onclick = () => {
+      const abierto = caja.nextElementSibling && caja.nextElementSibling.classList.contains("chat-menu");
+      lista.querySelectorAll(".chat-menu").forEach((x) => x.remove());
+      if (abierto) return;
+      const menu = document.createElement("div");
+      menu.className = "chat-menu";
+      if (c.id !== "principal") {
+        const ren = document.createElement("button");
+        ren.type = "button";
+        ren.className = "boton chico";
+        ren.textContent = "Renombrar";
+        ren.onclick = () => renombrarChat(c.id, caja);
+        menu.appendChild(ren);
+      }
+      const bor = document.createElement("button");
+      bor.type = "button";
+      bor.className = "boton chico peligro";
+      bor.textContent = c.id === "principal" ? "Vaciar" : "Borrar";
+      bor.onclick = () => borrarChat(c.id);
+      menu.appendChild(bor);
+      caja.after(menu);
+    };
+    return caja;
+  };
+  if (principal && coincide(principal)) lista.appendChild(fila(principal));
+  let grupo = "";
+  otros.forEach((c) => {
+    const g = cuandoChat(c.actualizado || c.creado);
+    if (g !== grupo) {
+      grupo = g;
+      const t = document.createElement("div");
+      t.className = "chats-grupo";
+      t.textContent = g.toUpperCase();
+      lista.appendChild(t);
+    }
+    lista.appendChild(fila(c));
+  });
+  if (!lista.children.length) {
+    const v = document.createElement("div");
+    v.className = "vacio chats-vacio";
+    v.textContent = buscado ? "No encontré chats con eso." : "Todavía no tenés otros chats.";
+    lista.appendChild(v);
+  }
+}
+
+function fechaCorta(ms) {
+  const d = new Date(ms || Date.now());
+  return d.getDate() + "/" + (d.getMonth() + 1);
+}
+
+function abrirChats() {
+  guardarCharla(true);
+  $("chats-buscar").value = "";
+  pintarListaChats();
+  $("chats-cajon").classList.add("abierto");
+  $("chats-velo").classList.add("abierto");
+  $("chats-cajon").setAttribute("aria-hidden", "false");
+  $("chats-novedad").hidden = true;
+}
+
+function cerrarChats() {
+  $("chats-cajon").classList.remove("abierto");
+  $("chats-velo").classList.remove("abierto");
+  $("chats-cajon").setAttribute("aria-hidden", "true");
+}
+
+function chatsAbierto() {
+  return $("chats-cajon").classList.contains("abierto");
+}
+
+function prepararChats() {
+  $("abrir-chats").onclick = abrirChats;
+  $("chat-titulo").onclick = abrirChats;
+  $("chat-nuevo").onclick = nuevoChat;
+  $("cajon-nuevo").onclick = nuevoChat;
+  $("cerrar-chats").onclick = cerrarChats;
+  $("chats-velo").onclick = cerrarChats;
+  $("chats-buscar").oninput = pintarListaChats;
+  $("chats-cajon").addEventListener("keydown", (e) => { if (e.key === "Escape") cerrarChats(); });
+  document.addEventListener("click", async (e) => {   // «Copiar» de un bloque de código
+    const b = e.target.closest(".codigo-copiar");
+    if (!b) return;
+    if (!(await copiarTexto(b.closest(".codigo").querySelector("code").textContent))) return avisar("No pude copiarlo.");
+    b.classList.add("hecho");
+    b.lastChild.textContent = "Copiado";
+    setTimeout(() => { b.classList.remove("hecho"); b.lastChild.textContent = "Copiar"; }, 1600);
+  });
+  pintarBarraChat();
+}
+
+// ---------- Las respuestas con formato, como en Claude (títulos, listas, código, tablas) ----------
+
+function enLinea(t) {
+  // (t ya viene escapado) el código en línea primero, así adentro no se toca nada
+  const codigos = [];
+  t = t.replace(/`([^`\n]+)`/g, (_, c) => { codigos.push(c); return "\u0000" + (codigos.length - 1) + "\u0000"; });
+  t = t.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)"']+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+    .replace(/(^|[^"=>\w])(https?:\/\/[^\s<"']+[^\s<"'.,;:!?)\]])/g, '$1<a href="$2" target="_blank" rel="noopener">$2</a>')
+    .replace(/\*\*([^*\n]+?)\*\*/g, "<b>$1</b>")
+    .replace(/__([^_\n]+?)__/g, "<b>$1</b>")
+    .replace(/(^|[\s(¿¡])\*([^*\s][^*\n]*?)\*(?=[\s).,;:!?]|$)/g, "$1<i>$2</i>")
+    .replace(/(^|[\s(¿¡])_([^_\s][^_\n]*?)_(?=[\s).,;:!?]|$)/g, "$1<i>$2</i>")
+    .replace(/~~([^~\n]+?)~~/g, "<s>$1</s>");
+  return t.replace(/\u0000(\d+)\u0000/g, (_, i) => "<code>" + codigos[Number(i)] + "</code>");
+}
+
+
+function empiezaBloque(l, siguiente) {
+  return /^\s*```/.test(l) || /^#{1,4}\s/.test(l) || /^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(l) || /^\s*&gt;/.test(l)
+    || RE_ITEM.test(l) || (esFilaTabla(l) && esSeparadorTabla(siguiente));
+}
+
+function markdown(texto) {
+  const lineas = escapar(String(texto || "")).replace(/\r/g, "").split("\n");
+  const html = [];
+  let i = 0, m;
+  while (i < lineas.length) {
+    const l = lineas[i];
+    if ((m = /^\s*```\s*([\w+#.-]*)\s*$/.exec(l))) {   // un bloque de código, con su botón de copiar
+      const cuerpo = [];
+      i++;
+      while (i < lineas.length && !/^\s*```\s*$/.test(lineas[i])) cuerpo.push(lineas[i++]);
+      i++;
+      html.push(`<div class="codigo"><div class="codigo-cabeza"><span>${m[1] || "código"}</span><button type="button" `
+        + `class="codigo-copiar" aria-label="Copiar el código">${ICONO_COPIAR}<span>Copiar</span></button></div>`
+        + `<pre><code>${cuerpo.join("\n")}</code></pre></div>`);
+      continue;
+    }
+    if (!l.trim()) { i++; continue; }
+    if ((m = /^(#{1,4})\s+(.+?)\s*#*$/.exec(l))) {
+      const n = Math.min(4, m[1].length + 1);
+      html.push(`<h${n}>${enLinea(m[2])}</h${n}>`);
+      i++;
+      continue;
+    }
+    if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(l)) { html.push("<hr>"); i++; continue; }
+    if (/^\s*&gt;/.test(l)) {
+      const cita = [];
+      while (i < lineas.length && /^\s*&gt;/.test(lineas[i])) cita.push(enLinea(lineas[i++].replace(/^\s*&gt;\s?/, "")));
+      html.push(`<blockquote>${cita.join("<br>")}</blockquote>`);
+      continue;
+    }
+    if (esFilaTabla(l) && esSeparadorTabla(lineas[i + 1])) {
+      const celdas = (x) => x.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => enLinea(c.trim()));
+      const cabeza = celdas(l);
+      i += 2;
+      const filas = [];
+      while (i < lineas.length && esFilaTabla(lineas[i])) filas.push(celdas(lineas[i++]));
+      html.push(`<div class="tabla"><table><thead><tr>${cabeza.map((c) => `<th>${c}</th>`).join("")}</tr></thead><tbody>`
+        + filas.map((f) => `<tr>${f.map((c) => `<td>${c}</td>`).join("")}</tr>`).join("") + "</tbody></table></div>");
+      continue;
+    }
+    if (RE_ITEM.test(l)) {   // listas (con viñetas o numeradas, y una adentro de otra)
+      const items = [];
+      while (i < lineas.length && (m = RE_ITEM.exec(lineas[i]))) {
+        items.push({nivel: Math.floor(m[1].replace(/\t/g, "  ").length / 2), ord: /\d/.test(m[2]), num: parseInt(m[2], 10), texto: enLinea(m[3])});
+        i++;
+        while (i < lineas.length && /^\s{2,}\S/.test(lineas[i]) && !RE_ITEM.test(lineas[i])) items[items.length - 1].texto += "<br>" + enLinea(lineas[i++].trim());
+      }
+      let out = "";
+      const abiertas = [];
+      items.forEach((it) => {
+        const nivel = Math.min(it.nivel, abiertas.length);
+        if (nivel === abiertas.length) {
+          const tag = it.ord ? "ol" : "ul";
+          out += `<${tag}${it.ord && it.num > 1 ? ` start="${it.num}"` : ""}>`;
+          abiertas.push(tag);
+        } else {
+          while (abiertas.length > nivel + 1) out += `</li></${abiertas.pop()}>`;
+          out += "</li>";
+        }
+        out += `<li>${it.texto}`;
+      });
+      while (abiertas.length) out += `</li></${abiertas.pop()}>`;
+      html.push(out);
+      continue;
+    }
+    const parrafo = [l];
+    i++;
+    while (i < lineas.length && lineas[i].trim() && !empiezaBloque(lineas[i], lineas[i + 1])) parrafo.push(lineas[i++]);
+    html.push(`<p>${parrafo.map(enLinea).join("<br>")}</p>`);
+  }
+  return html.join("");
+}
+
+function textoPlano(texto) {
+  // tus mensajes: tal cual (con sus saltos de línea), solo los links se pueden tocar
+  return escapar(texto).replace(/(https?:\/\/[^\s<"']+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+}
+
+function reintentar(m) {
+  // la última respuesta, de nuevo: se manda otra vez lo que dijiste (y la respuesta vieja se olvida, como al editar)
+  const i = mensajes.indexOf(m);
+  let j = i - 1;
+  while (j >= 0 && mensajes[j].quien !== "vos") j--;
+  const pregunta = mensajes[j];
+  if (!pregunta || pregunta.imagen || pregunta.archivo || (pregunta.archivos || []).length) return avisar("Esa no la puedo reintentar.", 3);
+  const texto = String(pregunta.texto || "").replace(/^🎙️ /, "").trim();
+  if (!texto) return;
+  const ids = mensajes.slice(j).map((x) => x.idApp).filter(Boolean);
+  ids.forEach(descartarId);
+  mensajes = mensajes.slice(0, j);
+  guardarCharla();
+  pintarCharla();
+  mandar(texto, {quitar: ids});
 }

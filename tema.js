@@ -53,6 +53,18 @@ html, body { background: #000; }
     if (meta) meta.content = "#02070d";
   },
 
+  async leerEstilo() {
+    // en la app de Android la página es un archivo (file://) y fetch() no puede leerlo: lo pasa el puente de Java
+    const nativo = window.JarvisNativo && window.JarvisNativo.estiloDeLaApp;
+    if (location.protocol === "file:" && nativo) return window.JarvisNativo.estiloDeLaApp();
+    try {
+      const r = await fetch("estilo.css", {cache: "no-store"});
+      if (r.ok) return await r.text();
+    } catch (e) { /* (abajo, el puente) */ }
+    if (nativo) return window.JarvisNativo.estiloDeLaApp();
+    throw new Error("no pude leer estilo.css");
+  },
+
   async aplicar(fondo, version) {
     // fondo: "negro" (de fábrica) o "azul" (el de antes). version: la de la app (si cambió estilo.css, se rearma)
     if (fondo === "azul") return Tema.sacar();
@@ -61,8 +73,9 @@ html, body { background: #000; }
       if (guardado && guardado.v === version && guardado.css) return Tema.poner(guardado.css);
     } catch (e) { /* (sin lo guardado: se arma) */ }
     try {
-      const r = await fetch("estilo.css", {cache: "no-store"});
-      const css = Tema.convertir(await r.text());
+      const original = await Tema.leerEstilo();
+      if (!original) throw new Error("estilo.css vacío");
+      const css = Tema.convertir(original);
       Tema.poner(css);
       try {
         localStorage.setItem(Tema.CLAVE, JSON.stringify({v: version, css: css}));
