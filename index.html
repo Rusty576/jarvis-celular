@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
   <meta name="theme-color" content="#02070d">
   <!-- Seguridad: solo corre lo de la app y solo habla con Google (el bot). Aunque algo raro se colara en un mensaje, no
        podría correr código ni mandar tus datos a otro lado. (file: es la app de Android, que trae la página adentro) -->
@@ -220,6 +220,47 @@
     <div id="fin-ultimos" class="lista"></div>
     <p class="ayuda">También por voz, acá o en la PC: «gasté 500 en el super», «cobré el sueldo, 30000», «agendá el pago de la luz
       de 2500 el 10 de cada mes», «pagué la luz», «¿cómo vengo con la plata?». Es lo mismo en los dos lados.</p>
+  </section>
+
+  <!-- Estudiar (jarv2): sets con quiz, verdadero/falso, flashcards, repaso espaciado y simulacro -->
+  <section id="vista-estudiar" class="vista">
+    <div id="est-portada">
+      <div class="tarjeta est-hoy">
+        <div class="est-cifras">
+          <div><small>RACHA</small><b id="est-racha">0</b><span>días</span></div>
+          <div><small>HOY</small><b id="est-hoy">0</b><span id="est-meta">de 20</span></div>
+          <div><small>PARA REPASAR</small><b id="est-para-hoy">0</b><span>hoy</span></div>
+        </div>
+        <button id="est-repasar" class="boton principal est-ancho" hidden>Repasar lo de hoy</button>
+      </div>
+      <details class="fin-agregar" id="est-nuevo-caja">
+        <summary>Nuevo set de estudio</summary>
+        <form id="est-nuevo" class="est-form" autocomplete="off">
+          <input id="est-tema" placeholder="Tema (la Revolución Francesa, fracciones…)" aria-label="Tema">
+          <textarea id="est-texto" rows="3" placeholder="…o pegá tus apuntes (opcional)" aria-label="Apuntes"></textarea>
+          <label class="est-check"><input type="checkbox" id="est-doc"> Del último documento o foto que le mandé</label>
+          <div class="fila-agregar">
+            <select id="est-cantidad" aria-label="Cuántas preguntas">
+              <option value="5">5 preguntas</option><option value="10" selected>10 preguntas</option><option value="15">15 preguntas</option>
+            </select>
+            <input id="est-fecha" type="date" aria-label="Fecha del examen (opcional)" title="Fecha del examen (opcional)">
+          </div>
+          <button class="boton principal est-ancho">Armar</button>
+        </form>
+      </details>
+      <h2>MIS SETS</h2>
+      <div id="est-sets" class="lista"></div>
+      <p class="ayuda">También en la charla: «haceme un quiz de…», «flashcards del documento». Se estudia sin internet: lo
+        que respondés se manda cuando vuelve, y lo que fallás vuelve para repasar.</p>
+    </div>
+    <div id="est-sesion" hidden>
+      <div class="est-barra">
+        <button id="est-salir" class="icono-boton chico" aria-label="Salir"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+        <div class="est-progreso"><i id="est-progreso"></i></div>
+        <span id="est-cuenta"></span>
+      </div>
+      <div id="est-tarjeta"></div>
+    </div>
   </section>
 
   <!-- Memoria de jarv2 (la misma que en la PC): protocolo «Memoria» -->
@@ -677,6 +718,8 @@
 <div id="aviso" class="cartel" hidden></div>
 
 <script src="reactor.js"></script>
+<script src="fin_reglas.js"></script>
+<script src="est_reglas.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

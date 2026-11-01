@@ -15,7 +15,7 @@
 // ============================================================
 "use strict";
 
-const VERSION_APP = "2026.11.01.1";
+const VERSION_APP = "2026.11.01.4";
 const ANDROID_WEB = "https://rusty576.github.io/jarvis-celular/android/";   // el APK y su version.json
 const $ = (id) => document.getElementById(id);
 const Reco = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -99,8 +99,12 @@ const esSeparadorTabla = (l) => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s
 let ultimaCharla = leerGuardado("ultimaCharla", null); // el último mensaje de la charla del bot que ya está acá
 let datosDia = leerGuardado("dia", null);              // lo último de «Mi día» y la PC (se ve aunque no haya internet)
 let cola = leerGuardado("cola", []);                   // lo que pediste sin internet: sale solo cuando vuelve
+const ERRORES_DE_RED = ["sin_red", "tiempo", "servidor"];
+let finLocales = leerGuardado("fin_locales", []);   // los cambios de plata que el bot todavía no confirmó
 let vistaActual = "inicio";
 // (la Memoria: arriba, porque arrancar() corre antes de llegar a su sección)
+let estudio = leerGuardado("estudio", null);   // Estudiar: los sets y los repasos (se estudia sin internet)
+let estSesion = null;                            // lo que estás respondiendo ahora
 let memoria = leerGuardado("memoria", null);   // lo último que vino del bot (se ve aunque no haya internet)
 let memRed = null;
 let memElegido = null;
@@ -229,7 +233,12 @@ function marcarConexion(estado) {
 
 function encolar(pedido) {
   cola.push(Object.assign({cuando: Date.now()}, pedido));
-  cola = cola.slice(-20);
+  // (lo anotado sin internet no se tira nunca: si hay demasiado, se van los mensajes de charla más viejos)
+  while (cola.length > 300) {
+    const i = cola.findIndex((c) => !c.silencioso);
+    if (i < 0) break;
+    cola.splice(i, 1);
+  }
   guardar("cola", cola);
   marcarConexion("mal");
 }
@@ -243,14 +252,29 @@ async function mandarCola() {
     while (cola.length) {
       const p = cola[0];
       let r;
+      colaEnCamino = p;
       try {
         r = await api(p.accion, p.datos || {});
       } catch (e) {
-        if (e.tipo === "sin_red" || e.tipo === "tiempo" || e.tipo === "servidor") break;   // sigue esperando
+        // sin red, Google lento o caído, o la llave cambió (se reconecta y sigue): sigue esperando, no se tira nada
+        if (["sin_red", "tiempo", "servidor", "http", "no_json", "llave"].includes(e.tipo)) break;
         r = {ok: false, error: e.message};
+      } finally {
+        colaEnCamino = null;
       }
-      cola.shift();
+      // (el bot falló por algo pasajero: un trabado, el cupo, demasiados pedidos): se reintenta, no se tira
+      // (si falla siempre igual, a los 50 intentos —unos 25 minutos— se deja: si no, trabaría todo lo que viene atrás)
+      if (r && !r.ok && (r.reintentar || r.error === "bloqueado") && (p.intentos = (p.intentos || 0) + 1) < 50) {
+        guardar("cola", cola);
+        break;
+      }
+      const lugar = cola.indexOf(p);   // (por referencia: mientras esperaba, la cola pudo cambiar)
+      if (lugar >= 0) cola.splice(lugar, 1);
       guardar("cola", cola);
+      if (p.accion === "app_finanza" && !(r && r.ok)) {   // el bot no lo aceptó: deja de contar acá
+        finLocales = finLocales.filter((o) => o.id !== (p.datos || {}).op_id);
+        guardar("fin_locales", finLocales);
+      }
       if (p.silencioso) {   // lo que ya se anotó en el celular sin internet: ahora lo sabe también el bot (y la PC)
         anotados++;
       } else if (p.accion === "app_mensaje") {
@@ -269,10 +293,26 @@ async function mandarCola() {
       }
     }
     if (!cola.length && charlados) avisar("Ya mandé lo que me pediste sin internet.", 3);
-    if (anotados) cargarDatos();   // Mi día, con lo del bot (que ya tiene lo anotado)
+    if (anotados) {   // Mi día, las finanzas y la memoria, con lo del bot (que ya tiene lo anotado)
+      cargarDatos();
+      cargarMemoria();
+    }
   } finally {
     mandandoCola = false;
+    // si quedó algo (Google no contestó, aunque haya internet: entonces no llega el aviso de «volvió internet»),
+    // se prueba de nuevo solo en un rato
+    if (cola.length && conexion) reintentarColaEn(30000);
   }
+}
+
+let reintentoCola = null;
+let colaEnCamino = null;   // el pedido de la cola que se está mandando ahora
+function reintentarColaEn(ms) {
+  if (reintentoCola) return;
+  reintentoCola = setTimeout(() => {
+    reintentoCola = null;
+    mandarCola();
+  }, ms);
 }
 
 function mostrarConectar(detalle) {
@@ -1178,7 +1218,8 @@ async function hacerAcciones(acciones) {
     const r = await mandarReporte(a.que, {yaEnLaCharla: true});
     if (!r.ok && r.texto) problema = r.texto;
   }
-  acciones = (acciones || []).filter((a) => !["abrir_url", "imagen", "a_la_pc", "reporte"].includes(a.tipo));
+  if ((acciones || []).some((a) => a.tipo === "estudio")) cargarEstudio();   // (el set que armó en la charla)
+  acciones = (acciones || []).filter((a) => !["abrir_url", "imagen", "a_la_pc", "reporte", "estudio"].includes(a.tipo));
   if (!acciones.length) return problema;
   if (!Nativo.hay) {
     if (Date.now() - ultimoToque < 4500) abrirUrl(accionAUrl(acciones[0]).url);
@@ -1200,6 +1241,9 @@ function pintarAcciones(contenedor, acciones) {
       const {texto, url} = accionAUrl(a);
       boton.textContent = "▶ " + texto;
       boton.onclick = () => abrirUrl(url);
+    } else if (a.tipo === "estudio") {   // un set de estudio que armó en la charla
+      boton.textContent = "▶ " + (a.texto || "Estudiar");
+      boton.onclick = () => abrirSetDeEstudio(a.set);
     } else if (Nativo.hay) {   // (ya se hizo solo: el botón es para repetirlo)
       boton.textContent = "▶ " + textoDeAccion(a);
       boton.onclick = () => hacerEnElTelefono(a).then((r) => { if (r.texto) avisar(r.texto, 2.5); });
@@ -3714,6 +3758,7 @@ const ICONOS = {
   pc: '<rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/>',
   almacen: '<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>',
   finanzas: '<rect x="3" y="6" width="18" height="13" rx="2.5"/><path d="M3 10h18M15.5 14.5h2.5"/>',
+  estudiar: '<path d="M3 8l9-4 9 4-9 4-9-4z"/><path d="M7 10v5c0 1.7 2.2 3 5 3s5-1.3 5-3v-5M21 8v6"/>',
   memoria: '<circle cx="12" cy="12" r="2.2"/><circle cx="5" cy="6" r="1.6"/><circle cx="19" cy="6" r="1.6"/><circle cx="5" cy="18" r="1.6"/><circle cx="19" cy="18" r="1.6"/><path d="M6.3 7l4 3.6M17.7 7l-4 3.6M6.3 17l4-3.6M17.7 17l-4-3.6"/>',
   boveda: '<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/>',
   juego: '<rect x="2" y="7" width="20" height="11" rx="5"/><path d="M7 10v4M5 12h4M15 11h.01M18 13h.01"/>',
@@ -3733,6 +3778,7 @@ const PROTOCOLOS = [
   {id: "fotos", nombre: "Buscar fotos", hacer: () => preguntarYHacer("¿De qué querés ver fotos?", (t) => "Mostrame fotos de " + t)},
   {id: "finanzas", nombre: "Finanzas", hacer: () => cambiarVista("finanzas")},
   {id: "memoria", nombre: "Memoria", hacer: () => cambiarVista("memoria")},
+  {id: "estudiar", nombre: "Estudiar", hacer: () => cambiarVista("estudiar")},
   {id: "almacen", nombre: "Almacenamiento", soloNativa: true, hacer: () => cambiarVista("almacen")},
   {id: "boveda", nombre: "Bóveda", soloNativa: true, hacer: () => cambiarVista("boveda")},
   {id: "captura", nombre: "Captura PC", soloPc: true, hacer: () => ordenParaLaPc("Sacá una captura de pantalla")},
@@ -4279,8 +4325,8 @@ async function cargarDatos(datos) {
   try {
     const d = datos || await apiLeer("app_datos");
     if (d.ok) {
-      datosDia = d;
-      guardar("dia", d);
+      datosDia = conLoDeLaCola(d);
+      guardar("dia", datosDia);
       programarAvisos();
     }
   } catch (e) { /* queda lo último que se vio */ }
@@ -4337,7 +4383,8 @@ function pintarDia() {
     const item = document.createElement("div");
     item.className = "item";
     item.innerHTML = `<span class="texto"><span class="cuando">${escapar(r.falta.toUpperCase())}</span>${escapar(r.texto)}</span>`;
-    item.appendChild(botonBorrar(`¿Borro el recordatorio «${r.texto}»?`, () => api("app_recordatorio", {id: r.id})));
+    item.appendChild(botonBorrarYa(`¿Borro el recordatorio «${r.texto}»?`, () => cambiarDia("app_recordatorio", {id: r.id},
+      (d) => { d.recordatorios = d.recordatorios.filter((x) => x.id !== r.id); }, "Borrado.")));
     recordatorios.appendChild(item);
   });
 
@@ -4350,14 +4397,16 @@ function pintarDia() {
     const tilde = document.createElement("button");
     tilde.className = "tilde";
     tilde.setAttribute("aria-label", "Hecho");
-    tilde.onclick = async () => {
+    tilde.onclick = () => {
       tilde.classList.add("hecho");
-      await accionDia(() => api("app_pendiente", {que: "hecho", id: p.id}), "¡Hecho!");
+      setTimeout(() => cambiarDia("app_pendiente", {que: "hecho", id: p.id},
+        (d) => { d.pendientes = d.pendientes.filter((x) => x.id !== p.id); }, "¡Hecho!"), 250);   // (se ve la tilde)
     };
     const texto = document.createElement("span");
     texto.className = "texto";
     texto.innerHTML = escapar(p.texto) + (p.para ? `<span class="para">para ${escapar(fechaLinda(p.para))}</span>` : "");
-    item.append(tilde, texto, botonBorrar(`¿Borro el pendiente «${p.texto}»?`, () => api("app_pendiente", {que: "borrar", id: p.id})));
+    item.append(tilde, texto, botonBorrarYa(`¿Borro el pendiente «${p.texto}»?`, () => cambiarDia("app_pendiente",
+      {que: "borrar", id: p.id}, (d) => { d.pendientes = d.pendientes.filter((x) => x.id !== p.id); }, "Borrado.")));
     pendientes.appendChild(item);
   });
 }
@@ -4582,6 +4631,7 @@ function cambiarVista(nombre) {
   else if (nombre === "boveda") pintarBoveda();
   else if (nombre === "finanzas") { pintarFinanzas(); cargarDatos(); }
   else if (nombre === "memoria") { pintarMemoria(); cargarMemoria(); }
+  else if (nombre === "estudiar") { if (!estSesion) pintarEstudio(); cargarEstudio(); }
 }
 
 function llenarVoces() {
@@ -4928,20 +4978,13 @@ function conectarBotones() {
 
   prepararFinanzas();
   prepararMemoria();
+  prepararEstudio();
   $("nuevo-pendiente").addEventListener("submit", (e) => {
     e.preventDefault();
     const texto = $("caja-pendiente").value.trim();
     if (!texto) return;
     $("caja-pendiente").value = "";
-    if (!hayInternet()) {   // sin internet: se ve ya, y se manda cuando vuelve
-      encolar({accion: "app_pendiente", datos: {que: "agregar", texto: texto}});
-      if (datosDia) {
-        datosDia.pendientes.push({id: "cola" + Date.now(), texto: texto + " ⏳", para: null});
-        pintarDia();
-      }
-      return avisar("No hay internet: lo agrego apenas vuelva.", 3);
-    }
-    accionDia(() => api("app_pendiente", {que: "agregar", texto: texto}), "Agregado.");
+    agregarPendiente(texto);   // (se ve ya; sin internet, se manda cuando vuelve)
   });
   ORDENES.forEach((orden) => {
     const chip = document.createElement("button");
@@ -5272,6 +5315,7 @@ function pintarFinanzas() {
     ["fin-pagos", "fin-categorias", "fin-cuentas", "fin-ultimos"].forEach((id) => ($(id).innerHTML = ""));
     return;
   }
+  const espera = new Set(finLocales.map((o) => o.id));   // (⏳: anotado acá, el bot todavía no lo tiene)
   $("fin-gastos").textContent = finPlataApp(f.gastos);
   $("fin-ingresos").textContent = finPlataApp(f.ingresos);
   const balance = f.ingresos - f.gastos;
@@ -5288,7 +5332,7 @@ function pintarFinanzas() {
     const vencido = p.vence < hoy, esHoy = p.vence === hoy;
     item.className = "item fin-pago" + (vencido ? " vencido" : esHoy ? " hoy" : "");
     const cuando = vencido ? "VENCIDO · " + fechaLinda(p.vence).toUpperCase() : esHoy ? "VENCE HOY" : "VENCE " + fechaLinda(p.vence).toUpperCase();
-    item.innerHTML = `<span class="texto"><span class="cuando">${escapar(cuando)}</span>${escapar(p.nombre)}
+    item.innerHTML = `<span class="texto"><span class="cuando">${escapar(cuando)}</span>${escapar(p.nombre)}${espera.has(p.id) ? " ⏳" : ""}
       <span class="para">${p.monto ? finPlataApp(p.monto) + " · " : ""}${{mensual: "todos los meses", anual: "todos los años",
       semanal: "todas las semanas"}[p.repetir] || "una sola vez"}</span></span>`;
     const pagar = document.createElement("button");
@@ -5336,7 +5380,7 @@ function pintarFinanzas() {
     const item = document.createElement("div");
     item.className = "item";
     item.innerHTML = `<span class="texto"><span class="cuando">${escapar(fechaLinda(m.fecha).replace(/^el /, "").toUpperCase())}</span>
-      ${escapar(m.categoria)}<span class="para">${escapar([m.nota !== m.categoria.toLowerCase() ? m.nota : "", m.cuenta].filter(Boolean).join(" · "))}</span></span>
+      ${escapar(m.categoria)}${espera.has(m.id) ? " ⏳" : ""}<span class="para">${escapar([m.nota !== m.categoria.toLowerCase() ? m.nota : "", m.cuenta].filter(Boolean).join(" · "))}</span></span>
       <b class="fin-saldo${m.monto < 0 ? "" : " positivo"}">${m.monto < 0 ? "" : "+"}${finPlataApp(m.monto)}</b>`;
     item.appendChild(finBotonBorrar(`¿Borro ${finPlataApp(Math.abs(m.monto))} de ${m.categoria}?`, {que: "borrar_mov", id: m.id}));
     ultimos.appendChild(item);
@@ -5353,20 +5397,63 @@ function finBotonBorrar(pregunta, datos) {
 }
 
 async function finHacer(datos, aviso) {
-  if (!conexion) return avisar("Conectá la app con el bot (/app en Telegram) para anotar tus finanzas.", 4);
-  if (!hayInternet()) return avisar("Sin internet no lo puedo anotar acá. Decíselo a la PC, o probá cuando vuelva.", 4);
+  if (!conexion) {
+    avisar("Conectá la app con el bot (/app en Telegram) para anotar tus finanzas.", 4);
+    return false;
+  }
+  const f = datosDia && datosDia.finanzas;
+  if (!f || !f.estado) {   // (un bot viejo, que no manda el estado entero: solo con internet, como antes)
+    if (!hayInternet()) {
+      avisar("Sin internet no lo puedo anotar acá. Decíselo a la PC, o probá cuando vuelva.", 4);
+      return false;
+    }
+    try {
+      const r = await api("app_finanza", datos, 40);
+      if (!r.ok) throw new Error(r.error || "No pude.");
+      datosDia = Object.assign(datosDia || {pendientes: [], recordatorios: [], recuerdos: []}, {finanzas: r.finanzas});
+      guardar("dia", datosDia);
+      pintarFinanzas();
+      programarAvisos();
+      if (aviso) avisar(aviso, 2.5);
+      return true;
+    } catch (e) {
+      avisar(e.message || "No pude.", 4);
+      return false;
+    }
+  }
+  // se anota acá ya (con las mismas reglas que el bot) y se manda; sin internet, cuando vuelva
+  const id = "a" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  const op = finOpLocal(datos, f.estado, id);
+  if (typeof op === "string") {
+    avisar(op, 3);
+    return false;
+  }
+  finAplicar(f.estado, op);
+  finLocales.push(op);
+  guardar("fin_locales", finLocales);
+  finRecalcular(f);
+  guardar("dia", datosDia);
+  pintarFinanzas();
+  programarAvisos();
+  finMandar(datos, id, aviso, op.fecha);   // (por detrás: ya quedó anotado acá, el formulario se limpia al toque)
+  return true;
+}
+
+async function finMandar(datos, id, aviso, fecha) {
   try {
-    const r = await api("app_finanza", datos, 40);
-    if (!r.ok) throw new Error(r.error || "No pude.");
-    datosDia = Object.assign(datosDia || {pendientes: [], recordatorios: [], recuerdos: []}, {finanzas: r.finanzas});
+    const x = await hacerOMasTarde("app_finanza", Object.assign({}, datos, {op_id: id, fecha: fecha}));
+    if (x.cola) return avisar("Sin internet: ya lo anoté acá (⏳) y se lo paso al bot cuando vuelva.", 3);
+    if (!x.r.ok) throw new Error(x.r.error || "No pude.");
+    datosDia.finanzas = finMezclar(x.r.finanzas);
     guardar("dia", datosDia);
     pintarFinanzas();
     programarAvisos();
     if (aviso) avisar(aviso, 2.5);
-    return true;
-  } catch (e) {
+  } catch (e) {   // el bot no lo aceptó: se deshace
+    finLocales = finLocales.filter((o) => o.id !== id);
+    guardar("fin_locales", finLocales);
     avisar(e.message || "No pude.", 4);
-    return false;
+    cargarDatos();
   }
 }
 
@@ -5426,7 +5513,7 @@ async function cargarMemoria() {
   try {
     const r = await apiLeer("app_memoria");
     if (r && r.ok) {
-      memoria = r;
+      memoria = memConLaCola(r);
       guardar("memoria", memoria);
     }
   } catch (e) { /* queda lo guardado */ }
@@ -5434,19 +5521,44 @@ async function cargarMemoria() {
 }
 
 async function memHacer(datos, aviso) {
-  if (!conexion) return avisar("Conectá la app con el bot (/app en Telegram) para usar la memoria.", 4);
-  if (!hayInternet()) return avisar("Sin internet no puedo cambiar la memoria. Probá cuando vuelva.", 4);
+  if (!conexion) {
+    avisar("Conectá la app con el bot (/app en Telegram) para usar la memoria.", 4);
+    return false;
+  }
+  if (datos.que === "guardar" || datos.que === "aprobar") datos = Object.assign({}, datos, {ref: "cola" + Date.now().toString(36)});
+  const enCola = String(datos.id || "").startsWith("cola") ? cola.find((c) => c.datos && c.datos.ref === datos.id) : null;
+  if (enCola && enCola === colaEnCamino) {
+    avisar("Un segundo: se está mandando. Probá de nuevo.", 2.5);
+    return false;
+  }
+  const deLaCola = !!enCola;
+  if (deLaCola) {   // uno guardado sin internet que todavía no salió: se saca de la cola y listo
+    cola = cola.filter((c) => c !== enCola);
+    guardar("cola", cola);
+  }
+  memLocal(memoria, datos);   // se ve ya
+  guardar("memoria", memoria);
+  memElegido = null;
+  pintarMemoria();
+  if (deLaCola) {
+    if (aviso) avisar(aviso, 2.5);
+    return true;
+  }
   try {
-    const r = await api("app_memoria_hacer", datos, 40);
-    if (!r.ok) throw new Error(r.error || "No pude.");
-    memoria = r;
+    const x = await hacerOMasTarde("app_memoria_hacer", datos);
+    if (x.cola) {
+      avisar("Sin internet: ya lo cambié acá (⏳) y se lo paso al bot cuando vuelva.", 3);
+      return true;
+    }
+    if (!x.r.ok) throw new Error(x.r.error || "No pude.");
+    memoria = memConLaCola(x.r);
     guardar("memoria", memoria);
-    memElegido = null;
     pintarMemoria();
     if (aviso) avisar(aviso, 2.5);
     return true;
   } catch (e) {
     avisar(e.message || "No pude.", 4);
+    cargarMemoria();
     return false;
   }
 }
@@ -5708,6 +5820,579 @@ function prepararMemoria() {
     if (await memHacer({que: "guardar", texto: texto}, "Guardado. Lo sé acá y en la PC.")) $("mem-nuevo-texto").value = "";
   });
 }
+// ---------- Sin internet (o si Google no contesta): se ve ya en el celular y se manda solo cuando vuelve ----------
+// Pendientes, recordatorios, finanzas y memoria se cambian acá al toque (con ⏳ lo que el bot todavía no tiene) y el
+// pedido queda en la cola, en orden. Las finanzas usan las mismas reglas que el bot y la PC (fin_reglas.js) y cada
+// cambio lleva su número: si se manda dos veces (se cortó y no se supo si llegó), el bot no lo anota dos veces.
+
+function hayColaSilenciosa() {
+  return cola.some((c) => c.silencioso);
+}
+
+async function hacerOMasTarde(accion, datos, segundos = 40) {
+  // {r} si el bot contestó; {cola: true} si quedó para cuando vuelva (sin internet, o Google sin contestar). Si ya hay
+  // cosas esperando, esta va atrás de ellas: así se mandan en el orden en que las hiciste
+  if (hayInternet() && !hayColaSilenciosa()) {
+    try {
+      return {r: await api(accion, datos, segundos)};
+    } catch (e) {
+      if (!ERRORES_DE_RED.includes(e.tipo)) throw e;
+    }
+  }
+  encolar({accion: accion, datos: datos, silencioso: true});
+  mandarCola();
+  return {cola: true};
+}
+
+function conLoDeLaCola(d) {
+  // lo que mandó el bot + lo que todavía espera en la cola (si no, al refrescar desaparecía lo anotado sin internet)
+  if (!d || !d.pendientes) return d;
+  cola.filter((c) => c.silencioso).forEach((c) => {
+    const x = c.datos || {};
+    if (c.accion === "app_pendiente" && x.que === "agregar") {
+      if (!d.pendientes.some((p) => p.id === x.ref)) d.pendientes.push({id: x.ref, texto: x.texto + " ⏳", para: null});
+    } else if (c.accion === "app_pendiente") {
+      d.pendientes = d.pendientes.filter((p) => String(p.id) !== String(x.id));
+    } else if (c.accion === "app_recordatorio") {
+      d.recordatorios = d.recordatorios.filter((r) => String(r.id) !== String(x.id));
+    }
+  });
+  if (d.finanzas) finMezclar(d.finanzas);
+  return d;
+}
+
+async function cambiarDia(accion, datos, local, aviso) {
+  // un pendiente o un recordatorio: se ve cambiado al toque; sin internet, se le pasa al bot cuando vuelve
+  const enCola = String(datos.id || "").startsWith("cola") ? cola.find((c) => c.datos && c.datos.ref === datos.id) : null;
+  if (enCola && enCola === colaEnCamino) return avisar("Un segundo: se está mandando. Probá de nuevo.", 2.5);
+  const deLaCola = !!enCola;
+  if (deLaCola) {   // uno anotado sin internet que todavía no salió: se saca de la cola y listo
+    cola = cola.filter((c) => c !== enCola);
+    guardar("cola", cola);
+  }
+  if (datosDia) {
+    local(datosDia);
+    guardar("dia", datosDia);
+    pintarDia();
+  }
+  if (deLaCola) return avisar(aviso || "Listo.", 2);
+  try {
+    const x = await hacerOMasTarde(accion, datos);
+    if (x.cola) return avisar("Sin internet: ya lo cambié acá y se lo paso al bot cuando vuelva.", 3);
+    if (!x.r.ok) throw new Error(x.r.error || "No pude.");
+    datosDia = conLoDeLaCola(x.r);
+    guardar("dia", datosDia);
+    pintarDia();
+    if (aviso) avisar(aviso, 2);
+  } catch (e) {
+    avisar(e.message || "No pude.");
+    cargarDatos();
+  }
+}
+
+function botonBorrarYa(pregunta, hacer) {
+  const boton = document.createElement("button");
+  boton.className = "borrar";
+  boton.setAttribute("aria-label", "Borrar");
+  boton.innerHTML = '<svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/></svg>';
+  boton.onclick = () => { if (confirm(pregunta)) hacer(); };
+  return boton;
+}
+
+async function agregarPendiente(texto) {
+  const ref = "cola" + Date.now().toString(36);
+  if (datosDia) {
+    datosDia.pendientes.push({id: ref, texto: texto + " ⏳", para: null});
+    guardar("dia", datosDia);
+    pintarDia();
+  }
+  try {
+    const x = await hacerOMasTarde("app_pendiente", {que: "agregar", texto: texto, ref: ref});
+    if (x.cola) return avisar("Sin internet: ya lo anoté acá (⏳) y se lo paso al bot cuando vuelva.", 3);
+    if (!x.r.ok) throw new Error(x.r.error || "No pude.");
+    datosDia = conLoDeLaCola(x.r);
+    guardar("dia", datosDia);
+    pintarDia();
+    avisar("Agregado.", 2);
+  } catch (e) {
+    avisar(e.message || "No pude.");
+    cargarDatos();
+  }
+}
+
+// --- finanzas, con las reglas de fin_reglas.js ---
+
+function hoyLocalIso() {
+  const d = new Date();
+  return d.getFullYear() + "-" + finDos(d.getMonth() + 1) + "-" + finDos(d.getDate());
+}
+
+function ahoraLocalIso() {
+  const d = new Date();
+  return hoyLocalIso() + "T" + finDos(d.getHours()) + ":" + finDos(d.getMinutes());
+}
+
+function finRecalcular(f) {
+  // el resumen, los últimos movimientos y los avisos, calculados acá (igual que finParaLaApp_ en el bot)
+  const hoy = hoyLocalIso(), ahora = ahoraLocalIso(), en40 = finSumarDias(hoy, 40);
+  Object.assign(f, finResumen(f.estado, hoy), {
+    ultimos: f.estado.movimientos.slice(-15).reverse(),
+    avisos: finVencimientos(f.estado, (datosDia && datosDia.pendientes) || [])
+      .filter((a) => a.cuando > ahora && a.fecha <= en40 && !(/-antes$/.test(a.id) && a.fecha <= a.cuando.slice(0, 10)))
+      .slice(0, 40).map((a) => ({id: a.id, cuando: a.cuando, texto: a.texto})),
+  });
+  return f;
+}
+
+function finMezclar(f) {
+  // lo del bot + lo que se anotó acá y el bot todavía no tiene (lo que ya tiene se reconoce por su número)
+  if (!f || !f.estado) return f;
+  finLocales = finLocales.filter((op) => f.estado.vistas.indexOf(op.id) < 0);
+  guardar("fin_locales", finLocales);
+  if (finLocales.length) {
+    finLocales.forEach((op) => finAplicar(f.estado, op));
+    finRecalcular(f);
+  }
+  return f;
+}
+
+function finOpLocal(c, e, id) {
+  // la misma operación que arma el bot (finApp_), con el número de acá: un texto si falta algo
+  const monto = Math.abs(Number(c.monto) || 0), nombre = String(c.nombre || "").trim().slice(0, 60), hoy = hoyLocalIso();
+  const mayuscula = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+  let op;
+  if (c.que === "gasto" || c.que === "ingreso") {
+    if (!monto) return "Poné cuánto.";
+    const sobre = String(c.sobre || "").trim().slice(0, 80);
+    op = {tipo: c.que, monto: monto, nota: sobre, cuenta: String(c.cuenta || "").trim().slice(0, 40), fecha: hoy,
+          categoria: c.que === "gasto" ? (sobre ? finCategoria(sobre) : "Otros") : (sobre ? mayuscula(sobre) : "Ingresos")};
+  } else if (c.que === "borrar_mov") {
+    op = {tipo: "borrar_mov", mov: String(c.id || "")};
+  } else if (c.que === "pago") {
+    if (!nombre || !/^\d{4}-\d{2}-\d{2}$/.test(String(c.vence || ""))) return "Poné qué es y cuándo vence.";
+    op = {tipo: "pago", nombre: mayuscula(nombre), monto: monto, vence: c.vence,
+          repetir: ["mensual", "semanal", "anual"].indexOf(c.repetir) >= 0 ? c.repetir : "", categoria: finCategoria(nombre)};
+  } else if (c.que === "pagado" || c.que === "borrar_pago") {
+    if (!e.pagos.some((p) => p.id === c.id)) return "Ese pago ya no está.";
+    op = c.que === "pagado" ? {tipo: "pagado", pago: c.id, monto: monto || undefined, fecha: hoy} : {tipo: "borrar_pago", pago: c.id};
+  } else if (c.que === "presupuesto") {
+    if (!String(c.categoria || "").trim()) return "Poné la categoría.";
+    op = {tipo: "presupuesto", categoria: finCategoria(c.categoria), monto: monto};
+  } else if (c.que === "cuenta") {
+    if (!nombre) return "Poné el nombre de la cuenta.";
+    op = {tipo: "cuenta", nombre: mayuscula(nombre), saldo: Number(c.saldo) || 0, borrar: !!c.borrar};
+  } else {
+    return "No sé hacer eso.";
+  }
+  return Object.assign(op, {id: id, en: Date.now()});
+}
+
+// --- memoria ---
+
+function memLocal(m, x) {
+  // el cambio de la memoria, hecho acá (con ⏳ lo nuevo que el bot todavía no tiene)
+  if (!m) return;
+  const hoy = hoyLocalIso();
+  if (x.que === "guardar") {
+    if (!m.recuerdos.some((r) => r.id === x.ref)) {
+      m.recuerdos.push({id: x.ref, texto: x.texto + " ⏳", categoria: "otros", auto: false, confianza: "", fecha: hoy});
+    }
+  } else if (x.que === "aprobar") {
+    if (m.candidatos.some((k) => k.texto === x.texto)) {
+      m.candidatos = m.candidatos.filter((k) => k.texto !== x.texto);
+      m.recuerdos.push({id: x.ref || "cola-" + x.texto, texto: x.texto + " ⏳", categoria: "otros", auto: false,
+                        confianza: "confirmado", fecha: hoy});
+    }
+  } else if (x.que === "descartar") {
+    m.candidatos = m.candidatos.filter((k) => k.texto !== x.texto);
+  } else if (x.que === "confirmar") {
+    m.recuerdos.filter((r) => String(r.id) === String(x.id)).forEach((r) => Object.assign(r, {auto: false, confianza: "confirmado"}));
+  } else if (x.que === "olvidar") {
+    m.recuerdos = m.recuerdos.filter((r) => String(r.id) !== String(x.id));
+  }
+}
+
+function memConLaCola(m) {
+  if (!m || !m.recuerdos) return m;
+  cola.filter((c) => c.silencioso && c.accion === "app_memoria_hacer").forEach((c) => memLocal(m, c.datos || {}));
+  return m;
+}
+
+// ---------- Estudiar (jarv2): sets con quiz, verdadero/falso, flashcards, repaso espaciado y simulacro ----------
+// La IA del bot arma el set; acá se guarda y se estudia aunque no haya internet (las reglas, iguales que en el bot, en
+// est_reglas.js). Cómo te fue sale con su número por la cola: no se suma dos veces.
+const DIFICULTADES = ["Muy fácil", "Fácil", "Justo", "Difícil", "Muy difícil"];
+
+async function cargarEstudio() {
+  if (conexion && hayInternet()) {
+    try {
+      const r = await apiLeer("app_estudio");
+      if (r && r.ok) {
+        estudio = estConLaCola(r.estudio);
+        guardar("estudio", estudio);
+      }
+    } catch (e) { /* queda lo guardado */ }
+  }
+  if (!estSesion) pintarEstudio();
+}
+
+function estConLaCola(e) {
+  // lo del bot + los resultados que todavía esperan en la cola (si no, al refrescar se perdía lo estudiado sin internet)
+  if (!e || !e.sets) return e;
+  cola.filter((c) => c.silencioso && c.accion === "app_estudio_resultado").forEach((c) => {
+    const x = c.datos || {};
+    estAplicarResultado(e, {id: x.op_id, set: x.set, modo: x.modo, respuestas: x.respuestas, dificultad: x.dificultad,
+                            nota: x.nota}, x.hoy || hoyLocalIso());
+  });
+  return e;
+}
+
+function estSet(id) {
+  return estudio && estudio.sets.find((s) => s.id === id);
+}
+
+function pintarEstudio() {
+  $("est-portada").hidden = false;
+  $("est-sesion").hidden = true;
+  const e = estudio;
+  if (!e) {
+    $("est-sets").innerHTML = `<div class="vacio">${conexion ? "Cargando…" : "Conectá la app con el bot (/app en Telegram) para estudiar."}</div>`;
+    return;
+  }
+  const hoy = hoyLocalIso(), r = estResumen(e, hoy);
+  $("est-racha").textContent = r.racha;
+  $("est-hoy").textContent = r.hoy;
+  $("est-meta").textContent = "de " + r.meta;
+  $("est-para-hoy").textContent = r.para_hoy;
+  $("est-repasar").hidden = !r.para_hoy;
+  const lista = $("est-sets");
+  lista.innerHTML = "";
+  if (!e.sets.length) lista.innerHTML = '<div class="vacio">Todavía no tenés sets. Escribí un tema arriba y tocá «Armar».</div>';
+  e.sets.slice().reverse().forEach((s) => {
+    const info = r.sets.find((x) => x.id === s.id) || {dominio: 0, para_hoy: 0, dias_examen: null};
+    const item = document.createElement("div");
+    item.className = "item est-set";
+    const examen = s.examen ? (info.dias_examen > 0 ? `examen en ${info.dias_examen} día${info.dias_examen === 1 ? "" : "s"}`
+      : info.dias_examen === 0 ? "examen HOY" : "ya fue el examen") + ` · meta ${s.examen.dominio}%` : "";
+    item.innerHTML = `<div class="est-dominio" style="--p:${info.dominio}"><span>${info.dominio}%</span></div>
+      <span class="texto"><b>${escapar(s.titulo)}</b><span class="para">${escapar([s.materia, s.preguntas.length + " preguntas",
+      s.tarjetas.length + " tarjetas"].filter(Boolean).join(" · "))}</span>${examen ? `<span class="para est-examen">${escapar(examen)}</span>` : ""}
+      ${info.para_hoy ? `<span class="para est-toca">${info.para_hoy} para repasar hoy</span>` : ""}</span>`;
+    const botones = document.createElement("div");
+    botones.className = "est-botones";
+    [["Quiz", () => estEmpezar("quiz", s.id)], ["Tarjetas", () => estEmpezar("tarjetas", s.id)],
+     ["Simulacro", () => estEmpezar("simulacro", s.id)]].forEach(([t, f]) => {
+      if (t === "Tarjetas" && !s.tarjetas.length) return;
+      const b = document.createElement("button");
+      b.className = "boton chico";
+      b.textContent = t;
+      b.onclick = f;
+      botones.appendChild(b);
+    });
+    botones.appendChild(botonBorrarYa(`¿Borro el set «${s.titulo}»?`, () => estBorrar(s.id)));
+    item.appendChild(botones);
+    lista.appendChild(item);
+  });
+}
+
+async function estCrear(ev) {
+  ev.preventDefault();
+  const tema = $("est-tema").value.trim(), texto = $("est-texto").value.trim(), documento = $("est-doc").checked;
+  if (!tema && !texto && !documento) return avisar("Escribí un tema (o pegá tus apuntes).", 3);
+  if (!conexion) return avisar("Conectá la app con el bot (/app en Telegram) para estudiar.", 4);
+  if (!hayInternet()) return avisar("Para armar un set nuevo hace falta internet. Los que ya tenés andan sin internet.", 4);
+  const boton = $("est-nuevo").querySelector("button.principal");
+  boton.disabled = true;
+  boton.textContent = "Armando el set…";
+  try {
+    const r = await api("app_estudio_crear", {tema: tema, texto: texto, documento: documento,
+                                               cantidad: Number($("est-cantidad").value) || 10,
+                                               examen: $("est-fecha").value ? {fecha: $("est-fecha").value, dominio: 90} : null}, 85);
+    if (!r.ok) throw new Error(r.error || "No pude.");
+    estudio = estConLaCola(r.estudio);
+    guardar("estudio", estudio);
+    ["est-tema", "est-texto", "est-fecha"].forEach((id) => ($(id).value = ""));
+    $("est-doc").checked = false;
+    $("est-nuevo-caja").open = false;
+    pintarEstudio();
+    avisar(`Listo: «${r.set.titulo}», con ${r.set.preguntas.length} preguntas y ${r.set.tarjetas.length} tarjetas.`, 3);
+  } catch (e) {
+    avisar(e.message || "No pude.", 4);
+  } finally {
+    boton.disabled = false;
+    boton.textContent = "Armar";
+  }
+}
+
+async function estBorrar(id) {
+  estudio.sets = estudio.sets.filter((s) => s.id !== id);
+  Object.keys(estudio.repaso).filter((k) => k.startsWith(id + "/")).forEach((k) => delete estudio.repaso[k]);
+  guardar("estudio", estudio);
+  pintarEstudio();
+  try {
+    await hacerOMasTarde("app_estudio_borrar", {set: id});
+  } catch (e) { /* (el bot lo saca la próxima vez que se pueda) */ }
+}
+
+function abrirSetDeEstudio(id) {
+  // desde la charla («haceme un quiz de…»): el protocolo Estudiar, con el set recién hecho
+  cambiarVista("estudiar");
+  cargarEstudio().then(() => { if (estSet(id)) estEmpezar("quiz", id); });
+}
+
+// --- la sesión: una lista de cosas para responder (preguntas o tarjetas), una por una ---
+
+function estEmpezar(modo, setId, items) {
+  const hoy = hoyLocalIso();
+  if (!items) {
+    if (modo === "repaso") {
+      items = estParaHoy(estudio, hoy).map((x) => {
+        const s = estSet(x.set);
+        const dato = s && (x.tipo === "pregunta" ? s.preguntas : s.tarjetas).find((y) => y.id === x.id);
+        return dato ? {set: x.set, tipo: x.tipo, dato: dato} : null;
+      }).filter(Boolean);
+    } else {
+      const s = estSet(setId);
+      if (!s) return;
+      items = modo === "tarjetas" ? s.tarjetas.map((t) => ({set: s.id, tipo: "tarjeta", dato: t}))
+        : s.preguntas.map((q) => ({set: s.id, tipo: "pregunta", dato: q}));
+      if (modo !== "simulacro") items = estMezclar(items);
+    }
+  }
+  if (!items.length) return avisar("No hay nada para repasar ahora. ¡Bien ahí!", 3);
+  if (estSesion) {   // (una sesión a medias: lo que ya respondiste se manda antes de empezar otra)
+    if (estSesion.temporizador) clearInterval(estSesion.temporizador);
+    if (estSesion.modo !== "simulacro") estEnviar(undefined, undefined, estSesion);
+  }
+  estSesion = {modo: modo, set: setId || null, items: items, i: 0, respuestas: [], fallados: [], repaso: false,
+               enviado: false, id: "a" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8)};
+  $("est-portada").hidden = true;
+  $("est-sesion").hidden = false;
+  if (modo === "simulacro") estSimulacro();
+  else estMostrar();
+}
+
+function estMezclar(lista) {
+  const l = lista.slice();
+  for (let i = l.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [l[i], l[j]] = [l[j], l[i]];
+  }
+  return l;
+}
+
+function estBarra() {
+  const s = estSesion;
+  $("est-progreso").style.width = Math.round(100 * s.i / s.items.length) + "%";
+  $("est-cuenta").textContent = `${Math.min(s.i + 1, s.items.length)} / ${s.items.length}`;
+}
+
+function estMostrar() {
+  const s = estSesion;
+  if (s.i >= s.items.length) return estFinRonda();
+  estBarra();
+  const it = s.items[s.i], caja = $("est-tarjeta");
+  caja.innerHTML = "";
+  if (it.tipo === "pregunta") estPregunta(caja, it);
+  else estFlash(caja, it);
+}
+
+function estAnotar(it, bien) {
+  const s = estSesion;
+  if (!s.repaso) s.respuestas.push({id: it.dato.id, set: it.set, bien: bien});   // (las vueltas de repaso no cuentan dos veces)
+  if (!bien) s.fallados.push(it);
+}
+
+function estPregunta(caja, it) {
+  const q = it.dato;
+  let elegida = null, comprobado = false;
+  caja.innerHTML = `<div class="est-tipo">${q.tipo === "vf" ? "VERDADERO O FALSO" : "ELEGÍ LA CORRECTA"}${q.tema ? " · " + escapar(q.tema).toUpperCase() : ""}</div>
+    <div class="est-enunciado">${escapar(q.enunciado)}</div><div class="est-opciones"></div><div class="est-explicacion" hidden></div>
+    <button class="boton principal est-seguir" disabled>Comprobar</button>`;
+  const opciones = caja.querySelector(".est-opciones"), seguir = caja.querySelector(".est-seguir");
+  q.opciones.forEach((o, n) => {
+    const b = document.createElement("button");
+    b.className = "est-opcion" + (q.tipo === "vf" ? " vf" : "");
+    b.textContent = o;
+    b.onclick = () => {
+      if (comprobado) return;
+      elegida = n;
+      opciones.querySelectorAll(".est-opcion").forEach((x, k) => x.classList.toggle("elegida", k === n));
+      seguir.disabled = false;
+    };
+    opciones.appendChild(b);
+  });
+  seguir.onclick = () => {
+    if (!comprobado) {
+      comprobado = true;
+      const bien = elegida === q.correcta;
+      opciones.querySelectorAll(".est-opcion").forEach((x, k) => {
+        x.classList.toggle("correcta", k === q.correcta);
+        x.classList.toggle("incorrecta", k === elegida && !bien);
+        x.disabled = true;
+      });
+      const ex = caja.querySelector(".est-explicacion");
+      ex.hidden = false;
+      ex.className = "est-explicacion " + (bien ? "bien" : "mal");
+      ex.innerHTML = `<b>${bien ? "¡Bien!" : "No era esa. La correcta: " + escapar(q.opciones[q.correcta])}</b>${escapar(q.explicacion)}`;
+      estAnotar(it, bien);
+      seguir.textContent = "Continuar";
+      try { if (Nativo.hay) window.JarvisNativo.vibrar(bien ? 20 : 60); } catch (e) { /* (sin vibrar) */ }
+    } else {
+      estSesion.i++;
+      estMostrar();
+    }
+  };
+}
+
+function estFlash(caja, it) {
+  const t = it.dato;
+  caja.innerHTML = `<div class="est-tipo">TARJETA${t.tema ? " · " + escapar(t.tema).toUpperCase() : ""}</div>
+    <button class="est-flash"><span class="est-frente">${escapar(t.frente)}</span><span class="est-dorso" hidden>${escapar(t.dorso)}</span>
+    <small>Tocá para dar vuelta</small></button><div class="est-sino" hidden><button class="boton no">No la sabía</button>
+    <button class="boton principal si">La sabía</button></div>`;
+  const flash = caja.querySelector(".est-flash"), sino = caja.querySelector(".est-sino");
+  flash.onclick = () => {
+    flash.classList.toggle("vuelta");
+    const vuelta = flash.classList.contains("vuelta");
+    flash.querySelector(".est-frente").hidden = vuelta;
+    flash.querySelector(".est-dorso").hidden = !vuelta;
+    flash.querySelector("small").textContent = vuelta ? "¿La sabías?" : "Tocá para dar vuelta";
+    sino.hidden = false;
+  };
+  sino.querySelector(".si").onclick = () => { estAnotar(it, true); estSesion.i++; estMostrar(); };
+  sino.querySelector(".no").onclick = () => { estAnotar(it, false); estSesion.i++; estMostrar(); };
+}
+
+function estFinRonda() {
+  const s = estSesion;
+  // tarjetas: «repetí estas» hasta que las sepas (la primera vuelta es la que cuenta para el repaso)
+  if (s.modo !== "quiz" && s.fallados.length && s.items.every((x) => x.tipo === "tarjeta")) {
+    estEnviar();
+    const n = s.fallados.length;
+    $("est-tarjeta").innerHTML = `<div class="est-resultado"><div class="est-grande">${n}</div>
+      <p>tarjeta${n === 1 ? "" : "s"} para repetir. ¿Las repasamos ahora?</p>
+      <button class="boton principal est-repetir">Repetirlas</button><button class="boton est-terminar">Terminar</button></div>`;
+    $("est-tarjeta").querySelector(".est-repetir").onclick = () => {
+      Object.assign(s, {items: estMezclar(s.fallados), fallados: [], i: 0, repaso: true});
+      estMostrar();
+    };
+    $("est-tarjeta").querySelector(".est-terminar").onclick = estSalir;
+    return;
+  }
+  estResultado();
+}
+
+function estResultado() {
+  const s = estSesion, total = s.respuestas.length, bien = s.respuestas.filter((x) => x.bien).length;
+  $("est-progreso").style.width = "100%";
+  const fallados = s.fallados.filter((x, i, l) => l.findIndex((y) => y.dato.id === x.dato.id && y.set === x.set) === i);
+  const frase = !total ? "¡Repasaste todo!" : bien === total ? "¡Perfecto!" : bien / total >= 0.7 ? "¡Muy bien!" : "Seguí así: lo que fallaste vuelve pronto.";
+  $("est-tarjeta").innerHTML = `<div class="est-resultado"><div class="est-grande">${bien}<small>/${total}</small></div><p>${frase}</p>
+    <label class="est-dificultad">¿Qué tan difícil fue? <b>${DIFICULTADES[2]}</b>
+    <input type="range" min="1" max="5" value="3" aria-label="Qué tan difícil fue"></label>
+    ${fallados.length ? `<button class="boton principal est-repetir">Repetir lo que fallé (${fallados.length})</button>` : ""}
+    <button class="boton est-terminar">Listo</button></div>`;
+  const rango = $("est-tarjeta").querySelector("input[type=range]");
+  rango.oninput = () => { $("est-tarjeta").querySelector(".est-dificultad b").textContent = DIFICULTADES[rango.value - 1]; };
+  const repetir = $("est-tarjeta").querySelector(".est-repetir");
+  if (repetir) {
+    repetir.onclick = () => {
+      estEnviar(Number(rango.value));
+      Object.assign(s, {items: estMezclar(fallados), fallados: [], i: 0, repaso: true});
+      estMostrar();
+    };
+  }
+  $("est-tarjeta").querySelector(".est-terminar").onclick = () => { estEnviar(Number(rango.value)); estSalir(); };
+}
+
+function estEnviar(dificultad, nota, sesion) {
+  // cómo te fue: se anota acá ya (repasos, racha) y va al bot con su número (sin internet, cuando vuelva)
+  const s = sesion || estSesion;
+  if (!s || s.enviado || !s.respuestas.length) return;
+  s.enviado = true;
+  const datos = {op_id: s.id, set: s.set || "", modo: s.modo, respuestas: s.respuestas, dificultad: dificultad || 0,
+                 nota: nota, hoy: hoyLocalIso()};
+  estAplicarResultado(estudio, {id: s.id, set: datos.set, modo: s.modo, respuestas: s.respuestas, dificultad: datos.dificultad,
+                                nota: nota}, datos.hoy);
+  guardar("estudio", estudio);
+  hacerOMasTarde("app_estudio_resultado", datos).then((x) => {
+    if (x.r && x.r.ok) {
+      estudio = estConLaCola(x.r.estudio);
+      guardar("estudio", estudio);
+      if (!estSesion) pintarEstudio();
+    }
+  }).catch(() => {});
+}
+
+function estSalir() {
+  if (estSesion && estSesion.temporizador) clearInterval(estSesion.temporizador);
+  if (estSesion && estSesion.modo !== "simulacro") estEnviar();
+  estSesion = null;
+  pintarEstudio();
+}
+
+// --- el simulacro: todas las preguntas, con tiempo, escribiendo la respuesta; lo corrige la IA ---
+
+function estSimulacro() {
+  const s = estSesion, minutos = Math.max(5, Math.round(s.items.length * 1.5));
+  s.fin = Date.now() + minutos * 60000;
+  $("est-progreso").style.width = "0%";
+  $("est-tarjeta").innerHTML = `<div class="est-tipo">SIMULACRO · ${minutos} MINUTOS · RESPONDÉ CON TUS PALABRAS</div>
+    ${s.items.map((it, n) => `<div class="est-sim"><div class="est-enunciado">${n + 1}. ${escapar(it.dato.enunciado)}</div>
+    <textarea rows="2" data-id="${it.dato.id}" placeholder="${it.dato.tipo === "vf" ? "Verdadero o falso, y por qué" : "Tu respuesta"}"></textarea></div>`).join("")}
+    <button class="boton principal est-entregar">Entregar</button>`;
+  $("est-tarjeta").querySelector(".est-entregar").onclick = () => estEntregar();
+  const tic = () => {
+    const falta = Math.max(0, s.fin - Date.now());
+    $("est-cuenta").textContent = `${Math.floor(falta / 60000)}:${finDos(Math.floor(falta / 1000) % 60)}`;
+    $("est-progreso").style.width = Math.round(100 * (1 - falta / (minutos * 60000))) + "%";
+    if (!falta) estEntregar(true);
+  };
+  tic();
+  s.temporizador = setInterval(tic, 1000);
+}
+
+async function estEntregar(porTiempo) {
+  const s = estSesion;
+  if (!s || s.entregando) return;
+  clearInterval(s.temporizador);   // (antes de mirar internet: si no, el aviso se repetía cada segundo)
+  if (!hayInternet()) return avisar("Para corregir el simulacro hace falta internet (tus respuestas quedan escritas): tocá «Entregar» cuando vuelva.", 5);
+  s.entregando = true;
+  const respuestas = [...$("est-tarjeta").querySelectorAll("textarea")].map((t) => ({id: t.dataset.id, texto: t.value.trim()}));
+  $("est-tarjeta").querySelector(".est-entregar").textContent = porTiempo ? "Se terminó el tiempo: corrigiendo…" : "Corrigiendo…";
+  try {
+    const r = await api("app_estudio_corregir", {set: s.set, respuestas: respuestas}, 85);
+    if (!r.ok) throw new Error(r.error || "No pude corregirlo.");
+    s.respuestas = r.por_pregunta.map((x) => ({id: x.id, set: s.set, bien: x.bien}));
+    estEnviar(0, r.nota, s);
+    if (estSesion !== s) return;   // (saliste mientras se corregía: la nota igual quedó anotada)
+    const set = estSet(s.set), lista = (t, x) => (x.length ? `<h3>${t}</h3><ul>${x.map((y) => `<li>${escapar(y)}</li>`).join("")}</ul>` : "");
+    $("est-tarjeta").innerHTML = `<div class="est-resultado"><div class="est-grande">${r.nota}<small>%</small></div>
+      <p>${r.nota >= 90 ? "¡Excelente!" : r.nota >= 70 ? "¡Bien!" : "A reforzar: mirá lo de abajo."}</p></div>
+      <div class="est-devolucion">${lista("Lo que salió bien", r.fortalezas)}${lista("A reforzar", r.flojos)}${lista("Consejos", r.recomendaciones)}
+      <h3>Pregunta por pregunta</h3>${r.por_pregunta.map((x) => {
+        const q = set && set.preguntas.find((y) => y.id === x.id);
+        return q ? `<div class="est-corr ${x.bien ? "bien" : "mal"}"><b>${x.bien ? "✓" : "✗"} ${escapar(q.enunciado)}</b>
+          <span>${escapar(x.comentario)}</span><span class="para">Respuesta: ${escapar(q.opciones[q.correcta])}</span></div>` : "";
+      }).join("")}</div><button class="boton principal est-terminar">Listo</button>`;
+    $("est-tarjeta").querySelector(".est-terminar").onclick = estSalir;
+  } catch (e) {
+    s.entregando = false;
+    avisar(e.message || "No pude corregirlo.", 4);
+    $("est-tarjeta").querySelector(".est-entregar").textContent = "Entregar";
+  }
+}
+
+function prepararEstudio() {
+  $("est-nuevo").addEventListener("submit", estCrear);
+  $("est-repasar").onclick = () => estEmpezar("repaso");
+  $("est-salir").onclick = () => {
+    if (estSesion && estSesion.modo === "simulacro" && !estSesion.entregando && !confirm("¿Salís del simulacro? No se corrige.")) return;
+    estSalir();
+  };
+}
+
 // ---------- Varios chats, como en Claude ----------
 // El «principal» es el de siempre: el mismo que Telegram y lo que cuenta la PC (y donde llegan los avisos). Los demás
 // son solo de la app; el bot les guarda el contexto aparte (los últimos 6), el celular guarda todos.

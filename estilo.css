@@ -112,7 +112,7 @@ svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width:
 .interruptor input { -webkit-appearance: none; appearance: none; flex: none; position: relative; width: 48px; height: 28px; margin: 0;
                      border-radius: 14px; border: 2px solid var(--texto-3); background: var(--panel); transition: background 0.2s, border-color 0.2s; }
 .interruptor input::after { content: ""; position: absolute; top: 5px; left: 5px; width: 14px; height: 14px; border-radius: 50%;
-                            background: var(--texto-3); transition: all 0.2s; }
+                            background: var(--texto-3); transition-property: top, left, width, height, background-color; transition-duration: 0.2s; }
 .interruptor input:checked { background: var(--cian); border-color: var(--cian); }
 .interruptor input:checked::after { top: 2px; left: 22px; width: 20px; height: 20px; background: #021018; }
 .escucha { margin: 10px 0 2px; }
@@ -935,3 +935,113 @@ html[data-animaciones=ninguna] .pensando-texto { animation: none; color: var(--t
 .mem-buscar { width: 100%; padding: 10px 14px; margin-bottom: 10px; border-radius: 12px; background: var(--panel);
               border: 1px solid var(--panel-borde); outline: none; font-weight: 500; }
 .mem-buscar:focus { border-color: var(--cian); }
+
+/* Estudiar (jarv2) */
+.est-cifras { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; text-align: center; }
+.est-cifras small { display: block; font-family: var(--titulo); font-size: 9px; letter-spacing: 0.18em; color: var(--texto-3); }
+.est-cifras b { display: block; font-family: var(--titulo); font-size: 26px; color: var(--cian); line-height: 1.2; }
+.est-cifras span { font-size: 12px; color: var(--texto-3); }
+.est-ancho { width: 100%; margin-top: 12px; }
+.est-form { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.est-form input:not([type=checkbox]), .est-form textarea, .est-form select, .est-sim textarea {
+  width: 100%; padding: 11px 14px; border-radius: 12px; background: var(--panel); border: 1px solid var(--panel-borde);
+  color: var(--texto); font: inherit; font-weight: 500; outline: none; }
+.est-form input:focus, .est-form textarea:focus, .est-sim textarea:focus { border-color: var(--cian); }
+.est-form .fila-agregar { margin: 0; }
+.est-check { display: flex; gap: 8px; align-items: center; font-size: 14px; color: var(--texto-2); }
+.est-set { flex-wrap: wrap; }
+.est-dominio { --p: 0; width: 46px; height: 46px; border-radius: 50%; flex: none; display: grid; place-items: center; position: relative;
+  background: conic-gradient(var(--cian) calc(var(--p) * 1%), var(--cian-tenue) 0); }
+.est-dominio::before { content: ""; position: absolute; inset: 5px; border-radius: 50%; background: var(--fondo); }
+.est-dominio span { position: relative; font-family: var(--titulo); font-size: 11px; color: var(--texto); }
+.est-botones { display: flex; gap: 6px; width: 100%; justify-content: flex-end; align-items: center; }
+.est-botones .boton.chico { padding: 6px 12px; font-size: 13px; }
+.est-examen { color: var(--ambar) !important; }
+.est-toca { color: var(--verde) !important; }
+.est-barra { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+.est-progreso { flex: 1; height: 6px; border-radius: 3px; background: var(--cian-tenue); overflow: hidden; }
+.est-progreso i { display: block; height: 100%; width: 0; background: var(--cian); transition: width 0.3s; }
+#est-cuenta { font-family: var(--titulo); font-size: 12px; color: var(--texto-2); min-width: 44px; text-align: right; }
+.est-tipo { font-family: var(--titulo); font-size: 10px; letter-spacing: 0.18em; color: var(--texto-3); margin-bottom: 8px; }
+.est-enunciado { font-size: 20px; font-weight: 600; line-height: 1.35; margin-bottom: 16px; }
+.est-opciones { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+.est-opciones:has(.vf) { flex-direction: row; }
+.est-opcion { text-align: left; padding: 14px 16px; border-radius: 14px; border: 1px solid var(--panel-borde); background: var(--panel);
+  color: var(--texto); font: inherit; font-size: 16px; font-weight: 500; transition: border-color 0.15s, background 0.15s; }
+.est-opcion.vf { flex: 1; text-align: center; }
+.est-opcion.elegida { border-color: var(--cian); background: var(--cian-tenue); }
+.est-opcion.correcta { border-color: var(--verde); background: rgba(77, 255, 184, 0.14); }
+.est-opcion.incorrecta { border-color: var(--rojo); background: rgba(255, 90, 106, 0.14); }
+.est-explicacion { padding: 12px 14px; border-radius: 12px; margin-bottom: 14px; font-size: 15px; line-height: 1.4; border-left: 3px solid; }
+.est-explicacion b { display: block; margin-bottom: 4px; }
+.est-explicacion.bien { border-color: var(--verde); background: rgba(77, 255, 184, 0.08); }
+.est-explicacion.mal { border-color: var(--rojo); background: rgba(255, 90, 106, 0.08); }
+.est-seguir, .est-resultado .boton { width: 100%; margin-top: 8px; }
+.est-flash { width: 100%; min-height: 220px; border-radius: 18px; border: 1px solid var(--panel-borde); background: var(--panel);
+  color: var(--texto); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 22px;
+  font: inherit; font-size: 21px; font-weight: 600; text-align: center; }
+.est-flash.vuelta { border-color: var(--cian); font-size: 17px; font-weight: 500; }
+.est-flash small { font-size: 12px; color: var(--texto-3); font-weight: 400; }
+.est-sino { display: flex; gap: 10px; margin-top: 14px; }
+.est-sino .boton { flex: 1; }
+.est-resultado { text-align: center; padding: 10px 0; }
+.est-grande { font-family: var(--titulo); font-size: 54px; color: var(--cian); line-height: 1.1; }
+.est-grande small { font-size: 22px; color: var(--texto-3); }
+.est-dificultad { display: block; margin: 16px 0; font-size: 14px; color: var(--texto-2); }
+.est-dificultad input { width: 100%; accent-color: var(--cian); }
+.est-sim { margin-bottom: 14px; }
+.est-sim .est-enunciado { font-size: 16px; margin-bottom: 6px; }
+.est-devolucion h3 { font-family: var(--titulo); font-size: 11px; letter-spacing: 0.18em; color: var(--cian); margin: 14px 0 6px; }
+.est-devolucion ul { margin: 0; padding-left: 18px; }
+.est-corr { padding: 10px 12px; border-radius: 12px; background: var(--panel); margin-bottom: 8px; border-left: 3px solid;
+  display: flex; flex-direction: column; gap: 4px; }
+.est-corr.bien { border-color: var(--verde); }
+.est-corr.mal { border-color: var(--rojo); }
+
+/* ---------- Como una app, no una web: sin zoom ni scroll de costado ---------- */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; touch-action: manipulation;   /* (sin zoom con doble toque) */
+       -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+html, body { overflow-x: hidden; max-width: 100%; }
+/* una pantalla con scroll vertical también puede moverse de costado si algo se pasa un pixel: eso se cierra acá */
+.vista, main, .mensajes { overflow-x: hidden; }
+img, video, canvas { max-width: 100%; }
+.msg, .item .texto, .tarjeta, .est-enunciado, .est-flash, .cartel span { overflow-wrap: anywhere; }
+.msg pre, .msg .tabla-envoltura, .msg table { max-width: 100%; }
+
+/* ---------- Terminación ---------- */
+/* números que no bailan cuando cambian */
+#hud-hora, #hud-clima, .clima-grados, .clima-dias, .fin-cifras b, .fin-saldo, .fin-monto, #est-cuenta, .est-cifras b, .est-grande,
+.mem-resumen b, .item .cuando, .est-dominio span, .almacen-barra, #fin-mes { font-variant-numeric: tabular-nums; }
+/* textos cortos que no quedan con una palabra sola abajo */
+.inicio-texto, .est-enunciado, .est-resultado p, .detalle-texto { text-wrap: balance; }
+.item .texto, .ayuda, .vacio, .est-explicacion, .msg p, .msg li { text-wrap: pretty; }
+/* profundidad sutil en tarjetas y filas (el borde separa; la sombra da el relieve) */
+.tarjeta, .item { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035), 0 10px 24px -16px rgba(0, 0, 0, 0.85); }
+/* al tocar: responde (chiquito, sin exagerar) */
+.boton, .icono-boton, .chip, .accion, .est-opcion, .item .borrar, .item .tilde, .protocolo, .pestana {
+  transition-property: transform, background-color, border-color, box-shadow, opacity, color;
+  transition-duration: 150ms; transition-timing-function: ease-out; -webkit-tap-highlight-color: transparent; }
+.boton:active:not(:disabled), .icono-boton:active, .chip:active, .accion:active, .est-opcion:active:not(:disabled),
+.item .borrar:active, .item .tilde:active, .pestana:active { transform: scale(0.96); }
+.protocolo:active { transform: scale(0.94); }
+.est-flash { transition-property: transform, border-color; transition-duration: 150ms; transition-timing-function: ease-out; }
+.est-flash:active { transform: scale(0.985); }
+/* áreas de toque de 40 px aunque el ícono sea chico */
+.item .borrar { min-width: 40px; min-height: 40px; display: grid; place-items: center; margin: -8px -8px -8px 0; border-radius: 12px; }
+.item .borrar:active { background: rgba(255, 90, 106, 0.12); color: var(--rojo); }
+.item .borrar svg { width: 20px; height: 20px; }
+.item .tilde { position: relative; }
+.item .tilde::after { content: ""; position: absolute; inset: -9px; }
+/* foco visible con teclado o lector de pantalla */
+:focus-visible { outline: 2px solid var(--cian); outline-offset: 2px; }
+input:focus-visible, textarea:focus-visible, select:focus-visible { outline: none; }
+/* fotos con un borde neutro: así no se funden con el fondo oscuro */
+.msg img.foto, .galeria img, .imagenes img { outline: 1px solid rgba(255, 255, 255, 0.1); outline-offset: -1px; }
+/* títulos de sección con un poco más de aire */
+.vista h2 { margin-top: 22px; }
+.vista h2:first-child { margin-top: 4px; }
+/* el que pidió moverse menos */
+@media (prefers-reduced-motion: reduce) {
+  .boton:active, .icono-boton:active, .chip:active, .accion:active, .est-opcion:active, .protocolo:active,
+  .item .borrar:active, .item .tilde:active, .pestana:active, .est-flash:active { transform: none; }
+}
