@@ -148,6 +148,70 @@
     </form>
   </section>
 
+  <!-- Finanzas de jarv2 (lo mismo que en la PC): protocolo «Finanzas» -->
+  <section id="vista-finanzas" class="vista">
+    <div class="tarjeta fin-mes">
+      <div class="fin-cifras">
+        <div><small>GASTASTE</small><b id="fin-gastos">—</b></div>
+        <div><small>ENTRÓ</small><b id="fin-ingresos">—</b></div>
+        <div><small>BALANCE</small><b id="fin-balance">—</b></div>
+      </div>
+      <p class="fin-mes-nombre" id="fin-mes"></p>
+    </div>
+    <form id="fin-anotar" class="fin-anotar" autocomplete="off">
+      <div class="fin-tipo" role="tablist">
+        <button type="button" data-tipo="gasto" class="activo">Gasto</button>
+        <button type="button" data-tipo="ingreso">Ingreso</button>
+      </div>
+      <div class="fila-agregar">
+        <input id="fin-monto" class="fin-monto" inputmode="decimal" placeholder="$ 0" aria-label="Monto">
+        <input id="fin-sobre" placeholder="¿En qué? (super…)" aria-label="En qué">
+        <button class="boton principal">Anotar</button>
+      </div>
+    </form>
+    <h2>PRÓXIMOS PAGOS</h2>
+    <div id="fin-pagos" class="lista"></div>
+    <details class="fin-agregar">
+      <summary>Agendar un pago</summary>
+      <form id="fin-nuevo-pago" class="fin-form" autocomplete="off">
+        <input id="fin-pago-nombre" placeholder="Qué es (luz, alquiler…)" aria-label="Qué es">
+        <input id="fin-pago-monto" inputmode="decimal" placeholder="$ (opcional)" aria-label="Monto">
+        <input id="fin-pago-vence" type="date" aria-label="Vence">
+        <select id="fin-pago-repetir" aria-label="Se repite">
+          <option value="mensual">Todos los meses</option>
+          <option value="anual">Todos los años</option>
+          <option value="semanal">Todas las semanas</option>
+          <option value="">Una sola vez</option>
+        </select>
+        <button class="boton principal">Agendar</button>
+      </form>
+    </details>
+    <h2>PRESUPUESTOS DEL MES</h2>
+    <div id="fin-categorias" class="lista"></div>
+    <details class="fin-agregar">
+      <summary>Poner un presupuesto</summary>
+      <form id="fin-presupuesto" class="fila-agregar" autocomplete="off">
+        <input id="fin-pres-cat" placeholder="Categoría (comida, salidas…)" aria-label="Categoría">
+        <input id="fin-pres-monto" class="fin-monto" inputmode="decimal" placeholder="$ por mes" aria-label="Por mes">
+        <button class="boton">Poner</button>
+      </form>
+    </details>
+    <h2>CUENTAS</h2>
+    <div id="fin-cuentas" class="lista"></div>
+    <details class="fin-agregar">
+      <summary>Anotar el saldo de una cuenta</summary>
+      <form id="fin-cuenta" class="fila-agregar" autocomplete="off">
+        <input id="fin-cuenta-nombre" placeholder="Banco, efectivo…" aria-label="Cuenta">
+        <input id="fin-cuenta-saldo" class="fin-monto" inputmode="decimal" placeholder="$ hoy" aria-label="Saldo de hoy">
+        <button class="boton">Guardar</button>
+      </form>
+    </details>
+    <h2>ÚLTIMOS MOVIMIENTOS</h2>
+    <div id="fin-ultimos" class="lista"></div>
+    <p class="ayuda">También por voz, acá o en la PC: «gasté 500 en el super», «cobré el sueldo, 30000», «agendá el pago de la luz
+      de 2500 el 10 de cada mes», «pagué la luz», «¿cómo vengo con la plata?». Es lo mismo en los dos lados.</p>
+  </section>
+
   <!-- El almacenamiento del celular (protocolo «Almacenamiento», en la app de Android) -->
   <section id="vista-almacen" class="vista">
     <h2>ALMACENAMIENTO</h2>
@@ -174,27 +238,47 @@
 
   <!-- La bóveda: apps que piden un código para abrirse (protocolo «Bóveda», en la app de Android) -->
   <section id="vista-boveda" class="vista">
-    <h2>BÓVEDA DE APPS</h2>
-    <div class="tarjeta">
-      <p class="ayuda">Las apps que pongas acá piden tu código antes de abrirse (WhatsApp, Galería, lo que quieras).</p>
-      <p class="ayuda" id="boveda-estado"></p>
-      <div id="boveda-sin-pin">
-        <label class="opcion">Código nuevo (4 a 8 números)
-          <input id="boveda-pin-nuevo" type="password" inputmode="numeric" autocomplete="off" maxlength="8"></label>
-        <label class="opcion">Repetilo
-          <input id="boveda-pin-otra" type="password" inputmode="numeric" autocomplete="off" maxlength="8"></label>
-        <div class="hoja-fila"><button type="button" id="boveda-crear" class="boton principal">Crear el código</button></div>
+    <div class="bov-cabeza">
+      <div class="bov-candado" id="boveda-candado">
+        <svg viewBox="0 0 24 24"><rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/><circle cx="12" cy="15.5" r="1.4"/></svg>
       </div>
-      <div id="boveda-con-pin" hidden>
-        <button type="button" id="boveda-accesibilidad" class="boton" hidden>Prenderla en Accesibilidad</button>
-        <label class="opcion">Buscar una app <input id="boveda-buscar" autocomplete="off" placeholder="Ej: WhatsApp"></label>
-        <div id="boveda-apps" class="boveda-apps"></div>
-        <label class="opcion">Tu código (para guardar los cambios)
-          <input id="boveda-pin" type="password" inputmode="numeric" autocomplete="off" maxlength="8"></label>
-        <div class="hoja-fila">
-          <button type="button" id="boveda-guardar" class="boton principal">Guardar la bóveda</button>
-          <button type="button" id="boveda-vaciar" class="boton peligro">Borrar la bóveda y el código</button>
-        </div>
+      <h2 class="bov-titulo">Bóveda de apps</h2>
+      <p class="bov-sub" id="boveda-estado">Las apps que pongas acá piden tu código (o tu huella) para abrirse.</p>
+    </div>
+    <!-- el teclado del código: para crearlo, para entrar y para cambiarlo -->
+    <div class="bov-pad" id="boveda-pad">
+      <p class="bov-pad-titulo" id="boveda-pad-titulo">Creá un código</p>
+      <div class="bov-puntos" id="boveda-puntos"></div>
+      <p class="bov-error" id="boveda-pad-error"></p>
+      <div class="bov-teclado" id="boveda-teclado"></div>
+      <div class="bov-pad-botones">
+        <button type="button" class="boton chico" id="boveda-pad-volver" hidden>Volver</button>
+        <button type="button" class="boton chico principal" id="boveda-pad-seguir" hidden>Siguiente</button>
+      </div>
+    </div>
+    <!-- adentro (con el código puesto) -->
+    <div id="boveda-dentro" hidden>
+      <button type="button" class="bov-alerta" id="boveda-accesibilidad" hidden>
+        <b>Falta un paso</b><span>Prendé «JARVIS · Bóveda» en Accesibilidad para que trabe las apps.</span><i>Prender</i>
+      </button>
+      <div class="bov-grupo">
+        <h3>Apps protegidas <span id="boveda-cuantas"></span></h3>
+        <input id="boveda-buscar" class="bov-buscar" autocomplete="off" placeholder="Buscar una app">
+        <div id="boveda-apps" class="bov-apps"></div>
+      </div>
+      <div class="bov-grupo">
+        <h3>Seguridad</h3>
+        <label class="bov-fila"><span>Volver a trabarla<small>Después de salir de la app, o al apagar la pantalla</small></span>
+          <select id="boveda-cuando">
+            <option value="salir">Al salir</option>
+            <option value="minuto">1 min después</option>
+            <option value="pantalla">Al apagar</option>
+          </select>
+        </label>
+        <label class="bov-fila" id="boveda-huella-fila"><span>Abrir con la huella<small>Si no, con el código</small></span>
+          <input type="checkbox" class="bov-switch" id="boveda-huella"></label>
+        <button type="button" class="bov-fila" id="boveda-cambiar"><span>Cambiar el código</span><i>›</i></button>
+        <button type="button" class="bov-fila peligro" id="boveda-vaciar"><span>Borrar la bóveda</span></button>
       </div>
     </div>
   </section>
@@ -509,7 +593,6 @@
     <div class="hoja-fila otros">
       <button type="button" id="ver-pc" class="boton">La PC</button>
       <button type="button" id="ver-almacen" class="boton solo-nativa">💾 Almacenamiento</button>
-      <button type="button" id="ver-boveda" class="boton solo-nativa">🔒 Bóveda de apps</button>
       <button type="button" id="reportar" class="boton">Reportar un problema</button>
       <button type="button" id="ajuste-actualizar" class="boton solo-nativa">Buscar actualización</button>
     </div>

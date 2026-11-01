@@ -15,7 +15,7 @@
 // ============================================================
 "use strict";
 
-const VERSION_APP = "2026.10.31.2";
+const VERSION_APP = "2026.10.31.3";
 const ANDROID_WEB = "https://rusty576.github.io/jarvis-celular/android/";   // el APK y su version.json
 const $ = (id) => document.getElementById(id);
 const Reco = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -1677,71 +1677,207 @@ async function contestarEnElCelular(texto, opciones) {
 
 // ---------- La bóveda de apps (piden tu código antes de abrirse) ----------
 
-let bovedaElegidas = new Set();
+// La bóveda, como el «bloqueo de apps» del teléfono: para entrar pide el código; adentro, cada app con su interruptor
+// (se aplica al toque), cuándo se vuelve a trabar, la huella, cambiar el código y borrarla
+const Boveda = {
+  pin: null,            // el código, mientras estás adentro (al salir de este apartado se olvida)
+  modo: "entrar",       // lo que pide el teclado: crear, repetir, entrar, cambiar, recambiar
+  primero: "",          // (al crear o cambiar: el primero que escribiste)
+  escrito: "",
+  estado: {},
+  elegidas: new Set(),
+};
 
 function pintarBoveda() {
   if (!Nativo.hay || !window.JarvisNativo.bovedaEstado) return;
-  const e = Nativo.ya("bovedaEstado");
-  bovedaElegidas = new Set(e.apps || []);
-  $("boveda-sin-pin").hidden = e.pin;
-  $("boveda-con-pin").hidden = !e.pin;
-  $("boveda-accesibilidad").hidden = !e.pin || e.prendida;
-  $("boveda-estado").textContent = !e.pin ? "Primero, un código (como el del celular, pero solo para estas apps)."
-    : !e.prendida ? "⚠️ Falta prenderla: tocá «Prenderla en Accesibilidad» y activá «JARVIS · Bóveda»."
-    : `✓ Funcionando: ${bovedaElegidas.size} app${bovedaElegidas.size === 1 ? "" : "s"} en la bóveda.`;
-  if (e.pin) pintarAppsBoveda();
+  const e = Boveda.estado = Nativo.ya("bovedaEstado");
+  Boveda.elegidas = new Set(e.apps || []);
+  const n = Boveda.elegidas.size;
+  $("boveda-estado").textContent = !e.pin ? "Las apps que pongas acá piden tu código (o tu huella) para abrirse."
+    : !e.prendida ? "Todavía no traba nada: falta prenderla en Accesibilidad."
+    : n ? `Protegiendo ${n} app${n === 1 ? "" : "s"}. Se traban apenas salís de ellas.` : "Elegí qué apps proteger.";
+  $("boveda-candado").classList.toggle("activa", !!(e.pin && e.prendida && n));
+  if (!e.pin) return pedirCodigo("crear");
+  if (!Boveda.pin) return pedirCodigo("entrar");
+  $("boveda-pad").hidden = true;
+  $("boveda-dentro").hidden = false;
+  $("boveda-accesibilidad").hidden = !!e.prendida;
+  $("boveda-cuando").value = e.cuando || "salir";
+  $("boveda-huella-fila").hidden = !e.huellaPosible;
+  $("boveda-huella").checked = !!e.huella;
+  $("boveda-cuantas").textContent = n ? `· ${n}` : "";
+  pintarAppsBoveda();
+}
+
+const TITULOS_PAD = {crear: "Creá un código (de 4 a 8 números)", repetir: "Repetilo", entrar: "Ingresá tu código",
+                     cambiar: "El código nuevo", recambiar: "Repetí el código nuevo"};
+
+function pedirCodigo(modo) {
+  Boveda.modo = modo;
+  Boveda.escrito = "";
+  $("boveda-dentro").hidden = true;
+  $("boveda-pad").hidden = false;
+  $("boveda-pad-titulo").textContent = TITULOS_PAD[modo];
+  $("boveda-pad-error").textContent = "";
+  $("boveda-pad-volver").hidden = !["repetir", "cambiar", "recambiar"].includes(modo);
+  pintarPuntosBoveda();
+}
+
+function largoBoveda() {
+  // al entrar se sabe cuántos números tiene (abre solo al completarlo, como el celular); al crear, de 4 a 8
+  return Boveda.modo === "entrar" && Boveda.estado.largo ? Boveda.estado.largo
+    : ["repetir", "recambiar"].includes(Boveda.modo) ? Boveda.primero.length : 0;
+}
+
+function pintarPuntosBoveda() {
+  const caja = $("boveda-puntos");
+  caja.innerHTML = "";
+  const largo = largoBoveda() || Math.max(4, Boveda.escrito.length);
+  for (let i = 0; i < largo; i++) {
+    const p = document.createElement("i");
+    if (i < Boveda.escrito.length) p.className = "lleno";
+    caja.appendChild(p);
+  }
+  const libre = !largoBoveda();   // (sin largo fijo: el botón para seguir)
+  $("boveda-pad-seguir").hidden = !libre || Boveda.escrito.length < 4;
+  $("boveda-pad-seguir").textContent = Boveda.modo === "entrar" ? "Entrar" : "Siguiente";
+}
+
+function teclaBoveda(x) {
+  $("boveda-pad-error").textContent = "";
+  if (x === "borrar") Boveda.escrito = Boveda.escrito.slice(0, -1);
+  else if (Boveda.escrito.length < 8) Boveda.escrito += x;
+  pintarPuntosBoveda();
+  const largo = largoBoveda();
+  if (largo && Boveda.escrito.length === largo) setTimeout(seguirBoveda, 120);
+}
+
+function errorBoveda(texto) {
+  Boveda.escrito = "";
+  pintarPuntosBoveda();
+  $("boveda-pad-error").textContent = texto;
+  const p = $("boveda-puntos");
+  p.classList.remove("tiembla");
+  void p.offsetWidth;   // (para que la animación arranque de nuevo)
+  p.classList.add("tiembla");
+  try { window.JarvisNativo.vibrar && window.JarvisNativo.vibrar(120); } catch (e) { /* sin vibrar */ }
+}
+
+function seguirBoveda() {
+  const x = Boveda.escrito;
+  if (Boveda.modo === "entrar") {
+    const r = Nativo.ya("bovedaComprobar", x);
+    if (!r.ok) return errorBoveda(r.error || "Código incorrecto");
+    Boveda.pin = x;
+    return pintarBoveda();
+  }
+  if (Boveda.modo === "crear" || Boveda.modo === "cambiar") {
+    if (!/^\d{4,8}$/.test(x)) return errorBoveda("Tiene que tener de 4 a 8 números.");
+    Boveda.primero = x;
+    return pedirCodigo(Boveda.modo === "crear" ? "repetir" : "recambiar");
+  }
+  if (x !== Boveda.primero) {
+    pedirCodigo(Boveda.modo === "repetir" ? "crear" : "cambiar");
+    return errorBoveda("No eran iguales. Probá de nuevo.");
+  }
+  const r = Nativo.ya("bovedaPin", Boveda.pin || "", x);
+  if (!r.ok) return errorBoveda(r.error);
+  avisar(Boveda.modo === "repetir" ? "Listo, código creado. Ahora elegí qué apps proteger." : "Listo, código cambiado.");
+  Boveda.pin = x;
+  Boveda.primero = "";
+  pintarBoveda();
+}
+
+function colorDeApp(nombre) {
+  let n = 0;
+  for (const c of nombre) n = (n * 31 + c.charCodeAt(0)) % 360;
+  return `hsl(${n}, 55%, 42%)`;
 }
 
 function pintarAppsBoveda() {
   const filtro = normalizar($("boveda-buscar").value || "");
-  const lista = Telefono.apps().slice().sort((a, b) => (bovedaElegidas.has(b.paquete) - bovedaElegidas.has(a.paquete))
+  const lista = Telefono.apps().slice().sort((a, b) => (Boveda.elegidas.has(b.paquete) - Boveda.elegidas.has(a.paquete))
                                                          || a.nombre.localeCompare(b.nombre));
   const caja = $("boveda-apps");
   caja.innerHTML = "";
   lista.filter((a) => !filtro || a.clave.includes(filtro)).slice(0, 200).forEach((a) => {
     const fila = document.createElement("label");
-    fila.className = "boveda-app" + (bovedaElegidas.has(a.paquete) ? " en-boveda" : "");
+    fila.className = "bov-app" + (Boveda.elegidas.has(a.paquete) ? " protegida" : "");
+    const letra = document.createElement("span");
+    letra.className = "bov-app-letra";
+    letra.style.background = colorDeApp(a.nombre);
+    letra.textContent = (a.nombre.trim()[0] || "?").toUpperCase();
+    const nombre = document.createElement("span");
+    nombre.className = "bov-app-nombre";
+    nombre.textContent = a.nombre;
     const c = document.createElement("input");
     c.type = "checkbox";
-    c.checked = bovedaElegidas.has(a.paquete);
+    c.className = "bov-switch";
+    c.checked = Boveda.elegidas.has(a.paquete);
+    c.setAttribute("aria-label", "Proteger " + a.nombre);
     c.onchange = () => {
-      if (c.checked) bovedaElegidas.add(a.paquete); else bovedaElegidas.delete(a.paquete);
-      fila.classList.toggle("en-boveda", c.checked);
+      const antes = new Set(Boveda.elegidas);
+      if (c.checked) Boveda.elegidas.add(a.paquete); else Boveda.elegidas.delete(a.paquete);
+      const r = Nativo.ya("bovedaApps", Boveda.pin || "", JSON.stringify([...Boveda.elegidas]));
+      if (!r.ok) {
+        Boveda.elegidas = antes;
+        c.checked = !c.checked;
+        return avisar(r.error);
+      }
+      fila.classList.toggle("protegida", c.checked);
+      const n = Boveda.elegidas.size;
+      $("boveda-cuantas").textContent = n ? `· ${n}` : "";
+      avisar(c.checked ? `🔒 ${a.nombre} protegida` : `${a.nombre} ya no pide código`, 2);
     };
-    const n = document.createElement("span");
-    n.textContent = a.nombre;
-    fila.append(c, n);
+    fila.append(letra, nombre, c);
     caja.appendChild(fila);
   });
 }
 
 function conectarBoveda() {
-  $("boveda-crear").onclick = () => {
-    const a = $("boveda-pin-nuevo").value, b = $("boveda-pin-otra").value;
-    if (a !== b) return avisar("Los dos códigos no son iguales.");
-    const r = Nativo.ya("bovedaPin", "", a);
-    if (!r.ok) return avisar(r.error);
-    $("boveda-pin-nuevo").value = $("boveda-pin-otra").value = "";
-    avisar("Listo, código creado. Ahora elegí las apps.");
-    pintarBoveda();
+  const teclado = $("boveda-teclado");
+  [["1", ""], ["2", "ABC"], ["3", "DEF"], ["4", "GHI"], ["5", "JKL"], ["6", "MNO"], ["7", "PQRS"], ["8", "TUV"],
+   ["9", "WXYZ"], ["", ""], ["0", ""], ["borrar", ""]].forEach(([x, letras]) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    if (!x) {
+      b.className = "bov-tecla vacia";
+      b.disabled = true;
+    } else if (x === "borrar") {
+      b.className = "bov-tecla sin-fondo";
+      b.setAttribute("aria-label", "Borrar");
+      b.innerHTML = '<svg viewBox="0 0 24 24"><path d="M9 5h11v14H9l-6-7z"/><path d="M12.5 9.5l5 5M17.5 9.5l-5 5"/></svg>';
+    } else {
+      b.className = "bov-tecla";
+      b.innerHTML = `<b>${x}</b>${letras ? `<small>${letras}</small>` : ""}`;
+    }
+    if (x) b.onclick = () => teclaBoveda(x);
+    teclado.appendChild(b);
+  });
+  $("boveda-pad-seguir").onclick = seguirBoveda;
+  $("boveda-pad-volver").onclick = () => {
+    if (Boveda.modo === "repetir") return pedirCodigo("crear");
+    Boveda.primero = "";
+    pintarBoveda();   // (cambiar o recambiar: vuelve adentro)
   };
   $("boveda-buscar").oninput = pintarAppsBoveda;
   $("boveda-accesibilidad").onclick = () => {
     window.JarvisNativo.abrirAccesibilidad();
     avisar("Buscá «JARVIS · Bóveda» y activala. Después volvé acá.", 6);
   };
-  $("boveda-guardar").onclick = () => {
-    const r = Nativo.ya("bovedaApps", $("boveda-pin").value, JSON.stringify([...bovedaElegidas]));
+  const opciones = () => {
+    const r = Nativo.ya("bovedaOpciones", Boveda.pin || "", $("boveda-cuando").value, $("boveda-huella").checked);
     if (!r.ok) return avisar(r.error);
-    $("boveda-pin").value = "";
-    avisar(`Listo: ${bovedaElegidas.size} app${bovedaElegidas.size === 1 ? "" : "s"} en la bóveda.`);
-    pintarBoveda();
+    $("boveda-huella").checked = !!r.huella;
   };
+  $("boveda-cuando").onchange = opciones;
+  $("boveda-huella").onchange = opciones;
+  $("boveda-cambiar").onclick = () => pedirCodigo("cambiar");
   $("boveda-vaciar").onclick = () => {
     if (!confirm("¿Borrar la bóveda y el código? Las apps se abren normal otra vez.")) return;
-    const r = Nativo.ya("bovedaBorrar", $("boveda-pin").value);
-    if (!r.ok) return avisar(r.error + " (poné tu código en «Tu código»)");
-    $("boveda-pin").value = "";
+    const r = Nativo.ya("bovedaBorrar", Boveda.pin || "");
+    if (!r.ok) return avisar(r.error);
+    Boveda.pin = null;
     avisar("Listo, bóveda borrada.");
     pintarBoveda();
   };
@@ -1839,9 +1975,7 @@ function pintarBotonBorrar() {
 }
 
 function conectarAlmacen() {
-  const irA = (vista) => () => { $("ajustes").close(); cambiarVista(vista); };
-  $("ver-almacen").onclick = irA("almacen");
-  $("ver-boveda").onclick = irA("boveda");
+  $("ver-almacen").onclick = () => { $("ajustes").close(); cambiarVista("almacen"); };
   $("almacen-cache").onclick = () => {
     const r = Nativo.ya("limpiarCache");
     avisar(`Listo, liberé ${gb(r.liberado || 0)}.`);
@@ -2042,8 +2176,150 @@ function pintarMensaje(m, indice) {
     div.appendChild(caja);
   }
   (m.tarjetas || []).forEach((t, i) => div.appendChild(pintarTarjeta(t, indice, i)));
+  if (m.pensado) div.insertBefore(pintarPensado(m.pensado), texto);
+  if ((m.quien === "vos" || m.quien === "jarvis") && (m.texto || "").trim()) div.appendChild(botonesDelMensaje(m));
   return div;
 }
+
+// ---------- Como en Claude: copiar un mensaje, editar lo tuyo, y lo que pensó ----------
+
+const PASOS = {   // las herramientas que usó el bot, dichas como pasos
+  buscar_en_internet: "Buscó en internet", ver_noticias: "Leyó las noticias", ver_clima: "Miró el clima",
+  ver_mi_dia: "Revisó tu día", ver_pendientes: "Miró tus pendientes", ver_recordatorios: "Miró tus recordatorios",
+  agregar_pendiente: "Anotó un pendiente", completar_pendiente: "Tachó un pendiente", borrar_pendiente: "Borró un pendiente",
+  crear_recordatorio: "Agendó un recordatorio", borrar_recordatorio: "Borró un recordatorio", guardar_recuerdo: "Lo recordó",
+  buscar_mails: "Buscó en tus mails", leer_mail: "Leyó un mail", mandar_mail: "Preparó un mail",
+  responder_mail: "Preparó una respuesta", borrar_mails: "Preparó borrar mails", buscar_direccion: "Buscó una dirección",
+  buscar_fotos: "Buscó fotos", crear_imagen: "Hizo una imagen", editar_imagen: "Editó la imagen",
+  crear_documento: "Armó un documento", crear_presentacion: "Armó una presentación", crear_poster: "Armó un póster",
+  orden_para_la_pc: "Le mandó una orden a la PC", ver_pc: "Miró la PC", mandar_a_la_pc: "Le pasó algo a la PC",
+  abrir_en_el_celular: "Abrió una app", musica_en_el_celular: "Puso música", whatsapp: "Preparó un WhatsApp",
+  llamar_por_telefono: "Preparó una llamada", alarma_en_el_celular: "Puso una alarma",
+  temporizador_en_el_celular: "Puso un temporizador", linterna: "La linterna", volumen_del_celular: "El volumen",
+  ajustes_del_celular: "Abrió un ajuste", reportar_problema: "Mandó un reporte", ver_finanzas: "Miró tus cuentas",
+  anotar_movimiento: "Anotó un gasto o ingreso", agendar_pago: "Agendó un pago", pagar_pago: "Marcó un pago",
+  fijar_presupuesto: "Fijó un presupuesto", borrar_movimiento: "Borró un movimiento", borrar_pago: "Sacó un pago",
+  saldo_de_cuenta: "Anotó un saldo",
+};
+
+function pintarPensado(p) {
+  // «Pensó 4 s ›»: se abre y muestra los pasos (como el bloque de pensamiento de Claude)
+  const det = document.createElement("details");
+  det.className = "pensado";
+  const sum = document.createElement("summary");
+  sum.textContent = p.seg >= 1 ? `Pensó ${p.seg} s` : "Pensó";
+  det.appendChild(sum);
+  const lista = document.createElement("ol");
+  const pasos = (p.pasos || []).map((x) => PASOS[x] || x.replace(/_/g, " "));
+  [...new Set(pasos)].forEach((x) => {
+    const li = document.createElement("li");
+    li.textContent = x;
+    lista.appendChild(li);
+  });
+  const li = document.createElement("li");
+  li.textContent = p.local ? "Contestó el cerebro del celular (sin internet)"
+    : p.ia ? `Gemini no podía: contestó ${p.ia}` : "Contestó Gemini";
+  lista.appendChild(li);
+  det.appendChild(lista);
+  return det;
+}
+
+const ICONO_COPIAR = '<svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>';
+const ICONO_LISTO = '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+const ICONO_EDITAR = '<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg>';
+
+function botonesDelMensaje(m) {
+  const fila = document.createElement("div");
+  fila.className = "msg-botones";
+  const boton = (icono, nombre, hacer) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "msg-boton";
+    b.innerHTML = icono;
+    b.setAttribute("aria-label", nombre);
+    b.title = nombre;
+    b.onclick = (e) => { e.stopPropagation(); hacer(b); };
+    fila.appendChild(b);
+    return b;
+  };
+  boton(ICONO_COPIAR, "Copiar", async (b) => {
+    if (!(await copiarTexto(m.texto))) return avisar("No pude copiarlo.");
+    b.innerHTML = ICONO_LISTO;
+    b.classList.add("hecho");
+    setTimeout(() => { b.innerHTML = ICONO_COPIAR; b.classList.remove("hecho"); }, 1600);
+  });
+  if (m.quien === "vos" && !m.imagen && !m.archivo && !(m.archivos || []).length) {
+    boton(ICONO_EDITAR, "Editar", () => editarMensaje(m));
+  }
+  return fila;
+}
+
+async function copiarTexto(texto) {
+  const limpio = String(texto || "").replace(/^🎙️ /, "");
+  try {
+    if (Nativo.hay && window.JarvisNativo.copiar) return window.JarvisNativo.copiar(limpio) !== false;
+    await navigator.clipboard.writeText(limpio);
+    return true;
+  } catch (e) {
+    const t = document.createElement("textarea");   // (el último recurso de los navegadores viejos)
+    t.value = limpio;
+    document.body.appendChild(t);
+    t.select();
+    const ok = document.execCommand("copy");
+    t.remove();
+    return ok;
+  }
+}
+
+function editarMensaje(m) {
+  // Como en Claude: lo cambiás ahí mismo y se manda de nuevo. Lo que venía después (la respuesta vieja) se va, también
+  // de lo que recuerda JARVIS
+  const div = divDe.get(m);
+  if (!div || div.classList.contains("editando")) return;
+  div.classList.add("editando");
+  [...div.children].forEach((x) => { if (!x.classList.contains("quien")) x.hidden = true; });
+  const editor = document.createElement("div");
+  editor.className = "editor-msg";
+  const caja = document.createElement("textarea");
+  caja.value = String(m.texto || "").replace(/^🎙️ /, "");
+  caja.rows = Math.min(8, Math.max(2, Math.ceil(caja.value.length / 32)));
+  const fila = document.createElement("div");
+  fila.className = "editor-botones";
+  const cancelar = document.createElement("button");
+  cancelar.type = "button";
+  cancelar.className = "boton chico";
+  cancelar.textContent = "Cancelar";
+  const enviar = document.createElement("button");
+  enviar.type = "button";
+  enviar.className = "boton chico principal";
+  enviar.textContent = "Enviar";
+  fila.append(cancelar, enviar);
+  editor.append(caja, fila);
+  div.appendChild(editor);
+  caja.focus();
+  caja.setSelectionRange(caja.value.length, caja.value.length);
+  cancelar.onclick = () => redibujar(m);
+  enviar.onclick = async () => {
+    const nuevo = caja.value.trim();
+    if (!nuevo || nuevo === String(m.texto || "").replace(/^🎙️ /, "").trim()) return redibujar(m);
+    const i = mensajes.indexOf(m);
+    const quitados = mensajes.slice(i);
+    const ids = quitados.map((x) => x.idApp).filter(Boolean);
+    ids.forEach(descartarId);
+    mensajes = mensajes.slice(0, i);
+    guardarCharla();
+    pintarCharla();
+    await mandar(nuevo, {quitar: ids});
+  };
+  caja.onkeydown = (e) => {
+    if (e.key === "Escape") redibujar(m);
+    if (e.key === "Enter" && !e.shiftKey && matchMedia("(pointer: fine)").matches) {
+      e.preventDefault();
+      enviar.onclick();
+    }
+  };
+}
+
 
 function tipoDeTarjeta(texto) {
   const n = normalizar(texto || "");
@@ -2123,6 +2399,7 @@ let desdeVisible = 0;
 
 function pintarCharla() {
   const lista = $("mensajes");
+  const piensa = lista.querySelector(".msg.pensando");   // (si está pensando, la burbuja sigue: antes se borraba)
   lista.innerHTML = "";
   if (!mensajes.length) {
     lista.appendChild(pintarMensaje({quien: "jarvis", texto: "Hola, soy JARVIS. Escribime, tocá el micrófono para "
@@ -2133,6 +2410,7 @@ function pintarCharla() {
   const pedazo = document.createDocumentFragment();   // (todo junto: el celular dibuja una sola vez)
   for (let i = desdeVisible; i < mensajes.length; i++) pedazo.appendChild(pintarMensaje(mensajes[i], i));
   lista.appendChild(pedazo);
+  if (piensa) lista.appendChild(piensa);
   bajar();
 }
 
@@ -2164,6 +2442,8 @@ function agregar(m) {
     pintarCharla();
   } else {
     $("mensajes").appendChild(pintarMensaje(m, mensajes.length - 1));
+    const piensa = $("mensajes").querySelector(".msg.pensando");   // («Pensando» siempre abajo de todo)
+    if (piensa) $("mensajes").appendChild(piensa);
   }
   bajar();
   if ((m.aviso || m.sincronizado) && vistaActual !== "charla") marcarNovedad(true);
@@ -2202,23 +2482,36 @@ function marcarNovedad(si) {
   if (pestana) pestana.classList.toggle("con-novedad", si);
 }
 
+let pensandoDesde = 0;   // cuándo empezó a pensar (para el «Pensó 4 s»)
+
 function pensando(si, texto) {
   $("logo").classList.toggle("pensando", si);
   document.body.classList.toggle("pensando-ya", si);
   const viejo = document.querySelector(".msg.pensando");
   if (viejo) viejo.remove();
+  clearInterval(pensando.reloj);
   if (si) {
+    // como el de Claude: la palabra brilla de un lado al otro, con los segundos; si tarda, dice por qué
+    pensandoDesde = Date.now();
     const div = document.createElement("div");
     div.className = "msg jarvis pensando";
     const t = document.createElement("span");
     t.className = "pensando-texto";
     t.textContent = texto || "Pensando";
+    const seg = document.createElement("time");
+    seg.className = "pensando-seg";
+    pensando.reloj = setInterval(() => {
+      const n = Math.round((Date.now() - pensandoDesde) / 1000);
+      seg.textContent = n >= 2 ? n + " s" : "";
+      if (n === 15 && !texto) t.textContent = "Sigue pensando";
+      if (n === 40 && !texto) t.textContent = "Tarda un poco (Gemini está lento)";
+    }, 500);
     const parar = document.createElement("button");
     parar.type = "button";
     parar.className = "boton-detener";
     parar.innerHTML = "<i></i>Detener";
     parar.onclick = detenerTodo;
-    div.append(t, parar);
+    div.append(t, seg, parar);
     listaDeMensajes().appendChild(div);
     bajar();
   }
@@ -2226,6 +2519,29 @@ function pensando(si, texto) {
 
 // Detener: corta lo que está pensando (la respuesta del bot, si llega después, se descarta) y lo que está diciendo
 const Detener = {turno: 0};
+
+// Cada mensaje que sale de acá lleva un número (idApp): el bot lo guarda con la charla, y al sincronizar se sabe con
+// certeza qué ya se ve (antes se comparaban los textos: si la respuesta venía en dos partes, o la cortaste con
+// Detener, volvía a aparecer, entera o en pedazos)
+const idsDescartados = new Set(leerGuardado("idsDescartados", []));
+let enCurso = null;   // lo que se está pensando ahora: {idApp, texto, mio, porVoz, en}
+
+function nuevoIdApp() {
+  return "a" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
+function descartarId(id) {
+  // lo que se cortó (Detener) o ya contestó el celular: si el bot lo contesta igual, no aparece
+  if (!id) return;
+  idsDescartados.add(id);
+  guardar("idsDescartados", [...idsDescartados].slice(-80));
+}
+
+function quitarMensaje(m) {
+  mensajes = mensajes.filter((x) => x !== m);
+  guardarCharla();
+  pintarCharla();
+}
 
 function hablando(si) {
   document.body.classList.toggle("hablando-ya", si);
@@ -2243,6 +2559,7 @@ function hablando(si) {
 
 function detenerTodo() {
   Detener.turno++;
+  if (enCurso) descartarId(enCurso.idApp);
   Voz.callar();
   hablando(false);
   try { if (Nativo.hay && Cerebro.estado && Cerebro.estado() && Cerebro.parar) Cerebro.parar(); } catch (e) { /* (sin cerebro) */ }
@@ -2271,8 +2588,17 @@ async function mandar(texto, opciones = {}) {
     agregar({quien: "aviso", texto: "🔁 Eso lo había dicho yo (me escuché por el parlante): no lo mando."});
     return {texto: "", tarjetas: [], acciones: [], error: true, eco: true};
   }
+  // lo dijiste en dos partes (una pausa al hablar) y lo primero todavía se está pensando: va todo junto, una vez
+  if (opciones.porVoz && texto && enCurso && enCurso.porVoz && Date.now() - enCurso.en < 20000 && !foto && !archivo && !varios) {
+    const anterior = enCurso;
+    Detener.turno++;
+    descartarId(anterior.idApp);
+    if (anterior.mio) quitarMensaje(anterior.mio);
+    texto = anterior.texto + " " + texto;
+  }
   const miTurno = Detener.turno;
-  const mio = agregar({quien: "vos", texto: texto || (opciones.audio ? "🎙️ ..." : ""), imagen: foto ? foto.miniatura : null,
+  const idApp = nuevoIdApp();
+  const mio = agregar({quien: "vos", idApp: idApp, texto: texto || (opciones.audio ? "🎙️ ..." : ""), imagen: foto ? foto.miniatura : null,
                        archivo: archivo ? archivo.nombre : null,
                        archivoInfo: archivo ? {mime: archivo.mime || "", tam: archivo.tam || 0} : undefined,
                        archivos: varios ? varios.map(resumenAdjunto) : undefined});
@@ -2339,15 +2665,21 @@ async function mandar(texto, opciones = {}) {
   // si el bot tarda (Gemini sin cupo o lento), el cerebro del celular se va cargando: si hace falta, contesta enseguida
   const conCerebro = soloTexto && !creando && Nativo.hay && Cerebro.listo();
   const precalentar = conCerebro ? setTimeout(() => Cerebro.preparar(), 12000) : null;
+  const esteEnvio = enCurso = {idApp: idApp, texto: texto, mio: mio, porVoz: !!opciones.porVoz, en: Date.now()};
   try {
-    const r = await api("app_mensaje", {texto: (contexto && texto ? contexto + " " : "") + (texto || ""),
+    const r = await api("app_mensaje", {texto: (contexto && texto ? contexto + " " : "") + (texto || ""), id_app: idApp,
+                                         quitar: opciones.quitar && opciones.quitar.length ? opciones.quitar : undefined,
                                          llamada: !!opciones.llamada, audio: opciones.audio || null,
                                          imagen: foto ? {mime: "image/jpeg", datos: foto.datos} : null,
                                          archivo: archivo ? {mime: archivo.mime, datos: archivo.datos, nombre: archivo.nombre} : null,
                                          archivos: varios ? varios.map(paraElBot) : undefined},
                         archivo || varios ? 180 : creando ? 300 : conCerebro ? 85 : 100);
     clearTimeout(precalentar);
-    if (miTurno !== Detener.turno) return {texto: "", tarjetas: [], acciones: [], cancelado: true};   // (tocaste Detener)
+    if (enCurso === esteEnvio) enCurso = null;
+    if (miTurno !== Detener.turno) {   // (tocaste Detener, o lo seguiste diciendo: va junto en otro envío)
+      descartarId(idApp);
+      return {texto: "", tarjetas: [], acciones: [], cancelado: true};
+    }
     if (r.pedido && !texto) {   // lo que entendió de la grabación, o lo que se preguntó de la foto
       mio.texto = (opciones.audio ? "🎙️ " : "") + r.pedido;
       guardar("mensajes", mensajes);
@@ -2356,6 +2688,7 @@ async function mandar(texto, opciones = {}) {
     if (!r.ok) throw new ErrorJarvis("bot", r.error === "mensaje vacío" ? "No te escuché bien. ¿Me lo repetís?" : (r.error || "No pude."));
     if (r.sin_cerebro && soloTexto) {   // Gemini no contestó (sin cupo, saturado): contesta el cerebro del celular
       pensando(false);
+      descartarId(idApp);
       const local = await enElCelular("Gemini no está contestando ahora: te contesto desde el celular.");
       if (local) return local;
     }
@@ -2363,8 +2696,9 @@ async function mandar(texto, opciones = {}) {
     const acciones = r.acciones || [];
     const imagenes = await prepararImagenes(acciones);   // (las imágenes que hizo o encontró JARVIS)
     pensando(false);
-    agregar({quien: "jarvis", texto: respuesta, tarjetas: r.tarjetas || [], acciones: acciones,
-             imagenes: imagenes.length ? imagenes : undefined, ia: r.ia || undefined});
+    agregar({quien: "jarvis", texto: respuesta, tarjetas: r.tarjetas || [], acciones: acciones, idApp: idApp,
+             imagenes: imagenes.length ? imagenes : undefined, ia: r.ia || undefined,
+             pensado: {seg: Math.round((Date.now() - pensandoDesde) / 1000), pasos: r.pasos || [], ia: r.ia || ""}});
     const problema = await hacerAcciones(acciones);   // abrir la app, llamar, la alarma...
     if (problema) {
       agregar({quien: "aviso", texto: problema});
@@ -2380,8 +2714,12 @@ async function mandar(texto, opciones = {}) {
             imagenes: imagenes};
   } catch (e) {
     clearTimeout(precalentar);
+    if (enCurso === esteEnvio) enCurso = null;
     pensando(false);
-    if (miTurno !== Detener.turno) return {texto: "", tarjetas: [], acciones: [], cancelado: true};
+    if (miTurno !== Detener.turno) {
+      descartarId(idApp);
+      return {texto: "", tarjetas: [], acciones: [], cancelado: true};
+    }
     if (creando && ["tiempo", "servidor", "no_json"].includes(e.tipo)) {
       const aviso = "Lo sigo armando (con imágenes tarda un poco): cuando esté, aparece acá en la charla.";
       agregar({quien: "aviso", texto: "⏳ " + aviso});
@@ -2391,7 +2729,10 @@ async function mandar(texto, opciones = {}) {
     if (soloTexto && ["sin_red", "servidor", "http", "no_json", "tiempo"].includes(e.tipo)) {
       // se cortó internet, o Google no contesta: contesta el celular (si tiene el cerebro bajado)
       const r = await enElCelular(e.tipo === "sin_red" ? null : e.message.replace(/\s*Probá.*$/, "") + " Te contesto desde el celular.");
-      if (r) return r;
+      if (r) {
+        descartarId(idApp);   // (si el bot contesta igual después, ya contestó el celular)
+        return r;
+      }
     }
     const aviso = e.tipo === "sin_red" ? sinInternet() : e.message;
     agregar({quien: "aviso", texto: (e.tipo === "sin_red" ? "⏳ " : "") + aviso});
@@ -2495,6 +2836,7 @@ async function sincronizarCharla(datos) {
   };
   charla.slice(desde).forEach((m) => {
     const quien = m.r === "user" ? "vos" : "jarvis";
+    if (m.a && (idsDescartados.has(m.a) || mensajes.some((x) => x.idApp === m.a && x.quien === quien))) return;
     const texto = m.t.replace(/^\(Te mandó [^)]*\)\s*/, "").replace(/^\(La PC hizo lo que pediste\)\s*/, "")
       .replace(/^\(Desde la app, orden para la PC\)\s*/, "🖥️ Orden para la PC: ");
     if (yaEstan.has(quien + "|" + limpio(texto)) || esRecorte(quien, limpio(texto))) return;
@@ -3319,6 +3661,7 @@ const ICONOS = {
   captura: '<rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4M6.5 9.5v-3h3M17.5 10.5v3h-3"/>',
   pc: '<rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/>',
   almacen: '<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>',
+  finanzas: '<rect x="3" y="6" width="18" height="13" rx="2.5"/><path d="M3 10h18M15.5 14.5h2.5"/>',
   boveda: '<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/>',
   juego: '<rect x="2" y="7" width="20" height="11" rx="5"/><path d="M7 10v4M5 12h4M15 11h.01M18 13h.01"/>',
 };
@@ -3335,6 +3678,7 @@ const PROTOCOLOS = [
   {id: "foto", nombre: "¿Qué es esto?", hacer: () => fotoYPreguntar()},
   {id: "imagen", nombre: "Crear imagen", hacer: () => preguntarYHacer("¿Qué imagen te hago?", (t) => "Haceme una imagen de " + t)},
   {id: "fotos", nombre: "Buscar fotos", hacer: () => preguntarYHacer("¿De qué querés ver fotos?", (t) => "Mostrame fotos de " + t)},
+  {id: "finanzas", nombre: "Finanzas", hacer: () => cambiarVista("finanzas")},
   {id: "almacen", nombre: "Almacenamiento", soloNativa: true, hacer: () => cambiarVista("almacen")},
   {id: "boveda", nombre: "Bóveda", soloNativa: true, hacer: () => cambiarVista("boveda")},
   {id: "captura", nombre: "Captura PC", soloPc: true, hacer: () => ordenParaLaPc("Sacá una captura de pantalla")},
@@ -3889,6 +4233,7 @@ async function cargarDatos(datos) {
   pintarDia();
   pintarPc();
   pintarProtocolos();
+  pintarFinanzas();
 }
 
 async function programarAvisos() {
@@ -3900,7 +4245,10 @@ async function programarAvisos() {
     guardar("ajustes", ajustes);
     await Nativo.cuando("pedirPermiso", "notificaciones");
   }
-  window.JarvisNativo.programarAvisos(JSON.stringify(datosDia.recordatorios.map((r) => ({id: r.id, cuando: r.cuando, texto: r.texto}))));
+  // (y los vencimientos de pagos y pendientes con fecha de jarv2: con el mismo número que el bot, así no se repiten)
+  const pagos = ((datosDia.finanzas || {}).avisos || []).map((a) => ({id: a.id, cuando: a.cuando, texto: a.texto}));
+  window.JarvisNativo.programarAvisos(JSON.stringify(datosDia.recordatorios.map((r) => ({id: r.id, cuando: r.cuando, texto: r.texto}))
+    .concat(pagos)));
 }
 
 const DIAS_CORTOS = ["DOM", "LUN", "MAR", "MIÉ", "JUE", "VIE", "SÁB"];
@@ -4161,6 +4509,7 @@ function cambiarVista(nombre) {
   if (nombre === "pc" && !tienePc()) nombre = "inicio";
   if (["almacen", "boveda"].includes(nombre) && !(Nativo.hay && window.JarvisNativo.almacenamiento)) nombre = "inicio";
   vistaActual = nombre;
+  if (nombre !== "boveda") Boveda.pin = null;   // (saliste del apartado de la bóveda: la próxima vez, el código)
   document.querySelectorAll(".vista").forEach((v) => v.classList.toggle("activa", v.id === "vista-" + nombre));
   document.querySelectorAll(".pestana[data-vista]").forEach((b) => b.classList.toggle("activa", b.dataset.vista === nombre));
   if (reactorInicio) {
@@ -4177,6 +4526,7 @@ function cambiarVista(nombre) {
   else if (nombre === "dia" || nombre === "pc") cargarDatos();
   else if (nombre === "almacen") pintarAlmacen(false);
   else if (nombre === "boveda") pintarBoveda();
+  else if (nombre === "finanzas") { pintarFinanzas(); cargarDatos(); }
 }
 
 function llenarVoces() {
@@ -4520,6 +4870,7 @@ function conectarBotones() {
   $("escuchar-jarvis").onchange = () => activarEscucha($("escuchar-jarvis").checked);
   $("actualizar-mails").onclick = cargarMails;
 
+  prepararFinanzas();
   $("nuevo-pendiente").addEventListener("submit", (e) => {
     e.preventDefault();
     const texto = $("caja-pendiente").value.trim();
@@ -4825,3 +5176,184 @@ function arrancar() {
 }
 
 arrancar();
+
+// ---------- Finanzas (jarv2: lo mismo que en la PC; lo guarda el bot y la PC lo sincroniza) ----------
+
+let finTipo = "gasto";
+
+function finPlataApp(monto) {
+  // $ 1.250 · $ 99,50 (como en la PC)
+  const m = Math.round(Number(monto || 0) * 100) / 100, abs = Math.abs(m);
+  const entero = String(Math.floor(abs)).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  const resto = Math.round((abs % 1) * 100);
+  return (m < 0 ? "-" : "") + "$ " + entero + (resto ? "," + String(resto).padStart(2, "0") : "");
+}
+
+function finMonto(texto) {
+  // «1.500», «1500,50», «2 mil», «$ 300» -> número
+  let t = String(texto || "").toLowerCase().replace(/\$|\s/g, "");
+  let por = 1;
+  if (/(mil|k|lucas?)$/.test(t)) { por = 1000; t = t.replace(/(mil|k|lucas?)$/, ""); }
+  if (/^\d{1,3}(\.\d{3})+(,\d{1,2})?$/.test(t)) t = t.replace(/\./g, "").replace(",", ".");
+  else t = t.replace(",", ".");
+  const n = parseFloat(t);
+  return isNaN(n) ? 0 : Math.round(n * por * 100) / 100;
+}
+
+const MESES_LARGOS = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre",
+                      "noviembre", "diciembre"];
+
+function pintarFinanzas() {
+  const f = datosDia && datosDia.finanzas;
+  const vacia = (id, texto) => { $(id).innerHTML = `<div class="vacio">${texto}</div>`; };
+  if (!f) {
+    ["fin-gastos", "fin-ingresos", "fin-balance"].forEach((id) => ($(id).textContent = "—"));
+    $("fin-mes").textContent = conexion ? "Cargando…" : "Conectá la app con el bot (/app en Telegram) para ver tus finanzas.";
+    ["fin-pagos", "fin-categorias", "fin-cuentas", "fin-ultimos"].forEach((id) => ($(id).innerHTML = ""));
+    return;
+  }
+  $("fin-gastos").textContent = finPlataApp(f.gastos);
+  $("fin-ingresos").textContent = finPlataApp(f.ingresos);
+  const balance = f.ingresos - f.gastos;
+  $("fin-balance").textContent = finPlataApp(balance);
+  $("fin-balance").classList.toggle("negativo", balance < 0);
+  $("fin-mes").textContent = MESES_LARGOS[Number(f.mes.slice(5, 7)) - 1].toUpperCase() + " " + f.mes.slice(0, 4);
+
+  const hoy = new Date().toISOString().slice(0, 10);
+  const pagos = $("fin-pagos");
+  pagos.innerHTML = "";
+  if (!f.pagos.length) vacia("fin-pagos", "No tenés pagos agendados. Te aviso antes de que venzan.");
+  f.pagos.forEach((p) => {
+    const item = document.createElement("div");
+    const vencido = p.vence < hoy, esHoy = p.vence === hoy;
+    item.className = "item fin-pago" + (vencido ? " vencido" : esHoy ? " hoy" : "");
+    const cuando = vencido ? "VENCIDO · " + fechaLinda(p.vence).toUpperCase() : esHoy ? "VENCE HOY" : "VENCE " + fechaLinda(p.vence).toUpperCase();
+    item.innerHTML = `<span class="texto"><span class="cuando">${escapar(cuando)}</span>${escapar(p.nombre)}
+      <span class="para">${p.monto ? finPlataApp(p.monto) + " · " : ""}${{mensual: "todos los meses", anual: "todos los años",
+      semanal: "todas las semanas"}[p.repetir] || "una sola vez"}</span></span>`;
+    const pagar = document.createElement("button");
+    pagar.className = "boton chico";
+    pagar.textContent = "Pagado";
+    pagar.onclick = () => finHacer({que: "pagado", id: p.id}, `Listo: ${p.nombre} pagado.`);
+    item.appendChild(pagar);
+    item.appendChild(finBotonBorrar(`¿Saco el pago «${p.nombre}»?`, {que: "borrar_pago", id: p.id}));
+    pagos.appendChild(item);
+  });
+
+  const cats = $("fin-categorias");
+  cats.innerHTML = "";
+  if (!f.categorias.length) vacia("fin-categorias", "Todavía no gastaste nada este mes.");
+  f.categorias.forEach((c) => {
+    const item = document.createElement("div");
+    item.className = "item fin-cat";
+    const por = c.presupuesto ? Math.min(100, Math.round(c.gastado / c.presupuesto * 100)) : 0;
+    const pasado = c.presupuesto && c.gastado > c.presupuesto, cerca = c.presupuesto && !pasado && c.gastado >= 0.8 * c.presupuesto;
+    item.innerHTML = `<span class="texto"><span class="fin-cat-fila"><b>${escapar(c.categoria)}</b>
+      <span>${finPlataApp(c.gastado)}${c.presupuesto ? ` <small>de ${finPlataApp(c.presupuesto)}</small>` : ""}</span></span>
+      ${c.presupuesto ? `<span class="almacen-barra${pasado ? " lleno" : ""}"><i style="width:${por}%"></i></span>
+      <span class="para">${pasado ? "Te pasaste " + finPlataApp(c.gastado - c.presupuesto) : cerca ? "Cerca del límite: quedan "
+        + finPlataApp(c.presupuesto - c.gastado) : "Quedan " + finPlataApp(c.presupuesto - c.gastado)}</span>` : ""}</span>`;
+    if (c.presupuesto) item.appendChild(finBotonBorrar(`¿Saco el presupuesto de ${c.categoria}?`, {que: "presupuesto", categoria: c.categoria, monto: 0}));
+    cats.appendChild(item);
+  });
+
+  const cuentas = $("fin-cuentas");
+  cuentas.innerHTML = "";
+  const nombres = Object.keys(f.cuentas);
+  if (!nombres.length) vacia("fin-cuentas", "Anotá cuánto tenés en cada cuenta y lo que gastes ahí se descuenta solo.");
+  nombres.forEach((n) => {
+    const item = document.createElement("div");
+    item.className = "item";
+    item.innerHTML = `<span class="texto"><b>${escapar(n)}</b></span><b class="fin-saldo${f.cuentas[n] < 0 ? " negativo" : ""}">${finPlataApp(f.cuentas[n])}</b>`;
+    item.appendChild(finBotonBorrar(`¿Saco la cuenta «${n}»?`, {que: "cuenta", nombre: n, borrar: true}));
+    cuentas.appendChild(item);
+  });
+
+  const ultimos = $("fin-ultimos");
+  ultimos.innerHTML = "";
+  if (!(f.ultimos || []).length) vacia("fin-ultimos", "Nada anotado todavía.");
+  (f.ultimos || []).forEach((m) => {
+    const item = document.createElement("div");
+    item.className = "item";
+    item.innerHTML = `<span class="texto"><span class="cuando">${escapar(fechaLinda(m.fecha).replace(/^el /, "").toUpperCase())}</span>
+      ${escapar(m.categoria)}<span class="para">${escapar([m.nota !== m.categoria.toLowerCase() ? m.nota : "", m.cuenta].filter(Boolean).join(" · "))}</span></span>
+      <b class="fin-saldo${m.monto < 0 ? "" : " positivo"}">${m.monto < 0 ? "" : "+"}${finPlataApp(m.monto)}</b>`;
+    item.appendChild(finBotonBorrar(`¿Borro ${finPlataApp(Math.abs(m.monto))} de ${m.categoria}?`, {que: "borrar_mov", id: m.id}));
+    ultimos.appendChild(item);
+  });
+}
+
+function finBotonBorrar(pregunta, datos) {
+  const boton = document.createElement("button");
+  boton.className = "borrar";
+  boton.setAttribute("aria-label", "Borrar");
+  boton.innerHTML = '<svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/></svg>';
+  boton.onclick = () => { if (confirm(pregunta)) finHacer(datos, "Listo."); };
+  return boton;
+}
+
+async function finHacer(datos, aviso) {
+  if (!conexion) return avisar("Conectá la app con el bot (/app en Telegram) para anotar tus finanzas.", 4);
+  if (!hayInternet()) return avisar("Sin internet no lo puedo anotar acá. Decíselo a la PC, o probá cuando vuelva.", 4);
+  try {
+    const r = await api("app_finanza", datos, 40);
+    if (!r.ok) throw new Error(r.error || "No pude.");
+    datosDia = Object.assign(datosDia || {pendientes: [], recordatorios: [], recuerdos: []}, {finanzas: r.finanzas});
+    guardar("dia", datosDia);
+    pintarFinanzas();
+    programarAvisos();
+    if (aviso) avisar(aviso, 2.5);
+    return true;
+  } catch (e) {
+    avisar(e.message || "No pude.", 4);
+    return false;
+  }
+}
+
+function prepararFinanzas() {
+  document.querySelectorAll(".fin-tipo button").forEach((b) => {
+    b.onclick = () => {
+      finTipo = b.dataset.tipo;
+      document.querySelectorAll(".fin-tipo button").forEach((x) => x.classList.toggle("activo", x === b));
+      $("fin-sobre").placeholder = finTipo === "gasto" ? "¿En qué? (super…)" : "¿De qué? (sueldo…)";
+    };
+  });
+  $("fin-anotar").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const monto = finMonto($("fin-monto").value);
+    if (!monto) return avisar("Poné cuánto.", 2.5);
+    const sobre = $("fin-sobre").value.trim();
+    if (await finHacer({que: finTipo, monto: monto, sobre: sobre},
+                       finTipo === "gasto" ? `Anotado: ${finPlataApp(monto)}${sobre ? " en " + sobre : ""}.` : `Anotado: entraron ${finPlataApp(monto)}.`)) {
+      $("fin-monto").value = $("fin-sobre").value = "";
+    }
+  });
+  $("fin-nuevo-pago").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const nombre = $("fin-pago-nombre").value.trim(), vence = $("fin-pago-vence").value;
+    if (!nombre || !vence) return avisar("Poné qué es y cuándo vence.", 3);
+    if (await finHacer({que: "pago", nombre: nombre, monto: finMonto($("fin-pago-monto").value), vence: vence,
+                        repetir: $("fin-pago-repetir").value}, `Agendado. Te aviso 2 días antes y ese día.`)) {
+      $("fin-pago-nombre").value = $("fin-pago-monto").value = $("fin-pago-vence").value = "";
+      $("fin-nuevo-pago").closest("details").open = false;
+    }
+  });
+  $("fin-presupuesto").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const cat = $("fin-pres-cat").value.trim(), monto = finMonto($("fin-pres-monto").value);
+    if (!cat || !monto) return avisar("Poné la categoría y cuánto por mes.", 3);
+    if (await finHacer({que: "presupuesto", categoria: cat, monto: monto}, `Listo: ${finPlataApp(monto)} por mes.`)) {
+      $("fin-pres-cat").value = $("fin-pres-monto").value = "";
+      $("fin-presupuesto").closest("details").open = false;
+    }
+  });
+  $("fin-cuenta").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const nombre = $("fin-cuenta-nombre").value.trim(), saldo = finMonto($("fin-cuenta-saldo").value);
+    if (!nombre || !$("fin-cuenta-saldo").value.trim()) return avisar("Poné la cuenta y cuánto tenés hoy.", 3);
+    if (await finHacer({que: "cuenta", nombre: nombre, saldo: saldo}, `Listo: ${nombre} con ${finPlataApp(saldo)}.`)) {
+      $("fin-cuenta-nombre").value = $("fin-cuenta-saldo").value = "";
+      $("fin-cuenta").closest("details").open = false;
+    }
+  });
+}
