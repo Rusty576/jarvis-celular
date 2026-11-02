@@ -15,7 +15,7 @@
 // ============================================================
 "use strict";
 
-const VERSION_APP = "2026.11.01.4";
+const VERSION_APP = "2026.11.01.6";
 const ANDROID_WEB = "https://rusty576.github.io/jarvis-celular/android/";   // el APK y su version.json
 const $ = (id) => document.getElementById(id);
 const Reco = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -1017,8 +1017,13 @@ function guardarGrande(ref, imagen) {
 async function prepararImagenes(acciones) {
   // Lo que vino en la respuesta: [{ref, mini, texto, url, prompt, formato}] para la galería del mensaje
   const lista = [];
-  const varias = acciones.filter((a) => a.tipo === "imagen" && a.datos).length > 1;
+  const varias = acciones.filter((a) => (a.tipo === "imagen" && a.datos) || (a.tipo === "imagen_web" && a.src)).length > 1;
   for (const a of acciones) {
+    if (a.tipo === "imagen_web" && a.src) {   // una foto de internet o un dibujo: la baja el celular (sin esperar acá)
+      lista.push({ref: "w" + Date.now() + Math.random().toString(36).slice(2, 6), mini: null, src: a.src, texto: a.texto || "",
+                  url: a.url || null, prompt: a.prompt || null, formato: a.formato || null});
+      continue;
+    }
     if (a.tipo !== "imagen" || !a.datos) continue;
     const ref = a.ref || "img" + Date.now() + Math.random().toString(36).slice(2, 6);
     guardarGrande(ref, {mime: a.mime, datos: a.datos});
@@ -1049,10 +1054,50 @@ async function miniaturaDe(blob, lado = 640) {
   return lienzo.toDataURL("image/jpeg", lado > 400 ? 0.8 : 0.72);
 }
 
+async function bajarImagen(src, segundos) {
+  // con la conexión del celular; Pollinations tarda unos segundos en dibujar y, si está ocupado, contesta 429: se espera y
+  // se vuelve a pedir (la misma semilla da la misma imagen)
+  for (let vuelta = 0; vuelta < 3; vuelta++) {
+    const corte = new AbortController();
+    const reloj = setTimeout(() => corte.abort(), segundos * 1000);
+    try {
+      const r = await fetch(src, {signal: corte.signal});
+      if (r.ok) {
+        const blob = await r.blob();
+        return /^image\//.test(blob.type) ? blob : null;
+      }
+      if (r.status !== 429 && r.status < 500) return null;
+    } catch (e) {
+      if (vuelta === 2) return null;
+    } finally {
+      clearTimeout(reloj);
+    }
+    await new Promise((listo) => setTimeout(listo, 8000 * (vuelta + 1)));
+  }
+  return null;
+}
+
+function base64De(blob) {
+  return new Promise((listo, error) => {
+    const lector = new FileReader();
+    lector.onload = () => listo(String(lector.result).split(",")[1]);
+    lector.onerror = error;
+    lector.readAsDataURL(blob);
+  });
+}
+
 async function traerImagen(im) {
-  // La imagen entera: la que vino recién, o la del buzón del bot (las que se hicieron en Telegram o en la PC)
+  // La imagen entera: la que vino recién, la de internet (se baja de nuevo) o la del buzón del bot (las que se hicieron
+  // en Telegram o en la PC)
   if (!im || !im.ref) return null;
   if (imagenesGrandes.has(im.ref)) return imagenesGrandes.get(im.ref);
+  if (im.src) {
+    if (!hayInternet()) return null;
+    const blob = await bajarImagen(im.src, im.prompt ? 90 : 30);
+    if (!blob) return null;
+    guardarGrande(im.ref, {mime: blob.type, datos: await base64De(blob)});
+    return imagenesGrandes.get(im.ref);
+  }
   if (!/^i[a-z0-9]{6,20}$/.test(im.ref) || !conexion || !hayInternet()) return null;
   try {
     const r = await apiLeer("app_imagen", {id: im.ref});
@@ -1064,12 +1109,21 @@ async function traerImagen(im) {
   }
 }
 
+const imagenesEnCamino = new Set();   // (las que se están trayendo: el mensaje se dibuja varias veces)
+
 async function completarImagenes(m) {
-  // Un mensaje que llegó con imágenes que todavía no están acá (de la charla de Telegram, de la PC, de un aviso)
+  // Un mensaje que llegó con imágenes que todavía no están acá (de la charla de Telegram, de la PC, de un aviso, las de
+  // internet que baja el celular)
   let cambio = false;
   for (const im of m.imagenes || []) {
-    if (im.mini || im.perdida) continue;
-    const grande = await traerImagen(im);
+    if (im.mini || im.perdida || imagenesEnCamino.has(im.ref)) continue;
+    imagenesEnCamino.add(im.ref);
+    let grande = null;
+    try {
+      grande = await traerImagen(im);
+    } finally {
+      imagenesEnCamino.delete(im.ref);
+    }
     try {
       if (grande) im.mini = await miniaturaDe(await (await fetch(`data:${grande.mime};base64,${grande.datos}`)).blob(),
                                               m.imagenes.length > 1 ? 360 : 640);
@@ -1099,9 +1153,19 @@ function pintarGaleria(m) {
       cuadro.appendChild(img);
     } else {
       cuadro.classList.add("sin-foto");
-      cuadro.textContent = im.perdida ? "Esta imagen ya no está" : "Trayendo la imagen...";
+      if (!im.perdida) cuadro.classList.add("cargando");
+      cuadro.textContent = im.perdida ? (im.src ? "No pude traerla · tocá para probar de nuevo" : "Esta imagen ya no está")
+        : im.prompt ? "🎨 Dibujando la imagen..." : "Trayendo la imagen...";
+      if (!im.perdida && im.src) setTimeout(() => completarImagenes(m), 0);
     }
-    cuadro.onclick = () => abrirVisor(m, i);
+    cuadro.onclick = () => {
+      if (im.perdida && im.src) {   // (otra vez: Pollinations estaba ocupado, o no había señal)
+        im.perdida = false;
+        redibujar(m);
+        return;
+      }
+      abrirVisor(m, i);
+    };
     caja.appendChild(cuadro);
   });
   if (m.imagenes.length === 1 && m.imagenes[0].ref) {   // una sola (la que hizo JARVIS): los botones a mano
@@ -1153,19 +1217,18 @@ async function compartirImagen(im) {
 
 async function otraVersion(im) {
   // la misma descripción, otra semilla: otra imagen parecida (sin gastar Gemini)
+  // (la dibuja Pollinations directo desde el celular: no hace falta pasar por el bot)
   if (!hayInternet()) return avisar("Para hacer otra versión hace falta internet.", 4);
   cambiarVista("charla");
-  pensando(true);
-  try {
-    const r = await api("app_crear_imagen", {descripcion: im.prompt, formato: im.formato || "cuadrada"}, 120);
-    pensando(false);
-    if (!r.ok) throw new Error(r.error || "No pude.");
-    const imagenes = await prepararImagenes(r.acciones || []);
-    agregar({quien: "jarvis", texto: "Otra versión:", imagenes: imagenes});
-  } catch (e) {
-    pensando(false);
-    agregar({quien: "aviso", texto: e.message || "No pude hacer otra versión."});
-  }
+  const imagenes = await prepararImagenes([{tipo: "imagen_web", src: urlPollinations(im.prompt, im.formato), texto: "🎨 Otra versión",
+                                            prompt: im.prompt, formato: im.formato || "cuadrada"}]);
+  agregar({quien: "jarvis", texto: "Otra versión:", imagenes: imagenes});
+}
+
+function urlPollinations(descripcion, formato) {
+  const [ancho, alto] = {vertical: [768, 1344], horizontal: [1344, 768]}[formato] || [1024, 1024];
+  return "https://image.pollinations.ai/prompt/" + encodeURIComponent(descripcion) + "?width=" + ancho + "&height=" + alto
+    + "&nologo=true&seed=" + Math.floor(Math.random() * 1e9);
 }
 
 // ---------- El visor: la imagen entera, a pantalla completa ----------
@@ -1219,7 +1282,7 @@ async function hacerAcciones(acciones) {
     if (!r.ok && r.texto) problema = r.texto;
   }
   if ((acciones || []).some((a) => a.tipo === "estudio")) cargarEstudio();   // (el set que armó en la charla)
-  acciones = (acciones || []).filter((a) => !["abrir_url", "imagen", "a_la_pc", "reporte", "estudio"].includes(a.tipo));
+  acciones = (acciones || []).filter((a) => !["abrir_url", "imagen", "imagen_web", "a_la_pc", "reporte", "estudio"].includes(a.tipo));
   if (!acciones.length) return problema;
   if (!Nativo.hay) {
     if (Date.now() - ultimoToque < 4500) abrirUrl(accionAUrl(acciones[0]).url);
@@ -1234,7 +1297,7 @@ async function hacerAcciones(acciones) {
 
 function pintarAcciones(contenedor, acciones) {
   contenedor.innerHTML = "";
-  (acciones || []).filter((a) => !["imagen", "a_la_pc", "reporte"].includes(a.tipo)).forEach((a) => {   // (las imágenes van en la galería)
+  (acciones || []).filter((a) => !["imagen", "imagen_web", "a_la_pc", "reporte"].includes(a.tipo)).forEach((a) => {   // (las imágenes van en la galería)
     const boton = document.createElement("button");
     boton.className = "accion";
     if (a.tipo === "abrir_url") {   // un documento que hizo JARVIS
@@ -2980,10 +3043,15 @@ function tamanoLindo(bytes) {
 async function prepararAdjunto(archivo) {
   // Una foto se achica (como mucho 1280 de lado); lo demás (PDF, audio, video, texto) va tal cual, hasta 15 MB. Lo más
   // grande no lo puede leer JARVIS, pero sí pasárselo a la PC (por eso queda también el archivo tal cual: original)
-  const original = {archivo: archivo, nombre: archivo.name || "archivo", mime: archivo.type || "application/octet-stream",
+  const ext = (String(archivo.name || "").split(".").pop() || "").toLowerCase();
+  const tipoFoto = {jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif",
+                    heic: "image/heic", heif: "image/heif", bmp: "image/bmp"}[ext];
+  const original = {archivo: archivo, nombre: archivo.name || "archivo", mime: archivo.type || tipoFoto || "application/octet-stream",
                     tam: archivo.size};
-  if (/^image\/(jpeg|png|webp|heic|heif)$/.test(archivo.type)) {
-    return Object.assign({tipo: "foto", original: original}, await prepararFoto(archivo));
+  if (/^image\//.test(original.mime)) {
+    try {
+      return Object.assign({tipo: "foto", original: original}, await prepararFoto(archivo));
+    } catch (e) { /* (una HEIC: este celular no la sabe dibujar; va tal cual, JARVIS la lee igual) */ }
   }
   if (archivo.size > MAX_ARCHIVO) {
     return {tipo: "archivo", grande: true, mime: original.mime, nombre: original.nombre, tam: archivo.size, original: original};
@@ -2994,8 +3062,8 @@ async function prepararAdjunto(archivo) {
     lector.onerror = () => error(new Error("No pude abrir ese archivo."));
     lector.readAsDataURL(archivo);
   });
-  const mime = archivo.type || ({txt: "text/plain", md: "text/markdown", csv: "text/csv", json: "application/json"}
-    [(archivo.name.split(".").pop() || "").toLowerCase()] || "application/octet-stream");
+  const mime = archivo.type || tipoFoto || ({txt: "text/plain", md: "text/markdown", csv: "text/csv", json: "application/json"}
+    [ext] || "application/octet-stream");
   return {tipo: "archivo", mime: mime, datos: datos, nombre: archivo.name || "archivo", tam: archivo.size, original: original};
 }
 
@@ -3148,7 +3216,10 @@ async function revisarArchivo(archivo) {
   const firma = new Uint8Array(await archivo.slice(0, 8).arrayBuffer());
   const empieza = (...b) => b.every((x, i) => firma[i] === x);
   const ext = (archivo.name.split(".").pop() || "").toLowerCase();
-  const es = {pdf: empieza(0x25, 0x50, 0x44, 0x46), png: empieza(0x89, 0x50, 0x4e, 0x47), jpg: empieza(0xff, 0xd8, 0xff)};
+  // (una foto con el nombre de otro formato es normal: WhatsApp guarda WEBP como .jpg, algunos Samsung HEIC como .jpg)
+  const foto = empieza(0x89, 0x50, 0x4e, 0x47) || empieza(0xff, 0xd8, 0xff) || empieza(0x52, 0x49, 0x46, 0x46)
+    || empieza(0x47, 0x49, 0x46) || (firma[4] === 0x66 && firma[5] === 0x74 && firma[6] === 0x79 && firma[7] === 0x70);
+  const es = {pdf: empieza(0x25, 0x50, 0x44, 0x46), png: foto, jpg: foto};
   es.jpeg = es.jpg;
   if (ext in es && !es[ext] && archivo.size > 8) {
     throw new Error(`«${archivo.name}» no es un ${ext.toUpperCase()} de verdad (está dañado, o es otra cosa con el nombre cambiado).`);
@@ -3437,7 +3508,8 @@ async function mandarReporte(que, opciones = {}) {
 // ---------- Las IAs de repuesto (Ajustes): cuando Gemini no tiene cupo o anda lento ----------
 
 const PAGINAS_IAS = {groq: "https://console.groq.com/keys", mistral: "https://console.mistral.ai/api-keys",
-                     openrouter: "https://openrouter.ai/keys"};
+                     openrouter: "https://openrouter.ai/keys", cohere: "https://dashboard.cohere.com/api-keys",
+                     cloudflare: "https://dash.cloudflare.com/?to=/:account/ai/workers-ai"};
 
 function pintarIas(r) {
   const caja = $("ias-lista");
@@ -3465,6 +3537,31 @@ function pintarIas(r) {
       caja.appendChild(fila);
       return;
     }
+    if (ia.abierta) {   // las que no necesitan clave: andan solas; se pueden apagar
+      estado.textContent = ia.apagada ? "Apagada" : ia.descansa ? "Lista (descansando un rato)" : "Lista, sin clave";
+      estado.className = "ia-estado" + (ia.apagada ? "" : " lista");
+      const boton = document.createElement("button");
+      boton.type = "button";
+      boton.className = "boton";
+      boton.textContent = ia.apagada ? "Prender" : "Apagar";
+      boton.onclick = async () => {
+        boton.disabled = true;
+        try {
+          const nuevo = await api("app_ias", {ia: ia.id, clave: ia.apagada ? "prender" : "apagar"}, 40);
+          if (!nuevo.ok) throw new Error(nuevo.error || "No pude.");
+          pintarIas(nuevo);
+        } catch (e) {
+          boton.disabled = false;
+          estado.textContent = e.message;
+        }
+      };
+      const filaBoton = document.createElement("div");
+      filaBoton.className = "hoja-fila";
+      filaBoton.append(boton);
+      fila.append(cabeza, nota, filaBoton);
+      caja.appendChild(fila);
+      return;
+    }
     const entrada = document.createElement("input");
     entrada.type = "password";
     entrada.autocomplete = "off";
@@ -3482,7 +3579,8 @@ function pintarIas(r) {
     pagina.type = "button";
     pagina.className = "boton";
     pagina.textContent = "Conseguir una clave gratis";
-    pagina.onclick = () => abrirUrl(PAGINAS_IAS[ia.id] || "https://" + ia.donde);
+    // (antes armaba el link con el texto de «dónde»: el de Cloudflare, «dash.cloudflare.com → AI → ...», no abría)
+    pagina.onclick = () => abrirUrl(ia.url || PAGINAS_IAS[ia.id] || "https://" + String(ia.donde || "").split(/\s/)[0]);
     const cambiar = async (clave) => {
       guardar.disabled = sacarla.disabled = true;
       estado.textContent = clave ? "Probando la clave..." : "Quitándola...";
@@ -4593,25 +4691,235 @@ const COLORES = {
   violeta: {cian: "#a77bff", fuerte: "#cbb0ff", oscuro: "#7448d6", rgb: "167, 123, 255"},
 };
 
+// A tu gusto: un color propio para JARVIS, las letras, el fondo, el reactor, tus mensajes y las tarjetas
+function rgbDe(hex) {
+  const h = String(hex || "").trim().replace(/^#/, "");
+  return /^[0-9a-f]{6}$/i.test(h) ? [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16)) : null;
+}
+const hexDe = (rgb) => "#" + rgb.map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0")).join("");
+const mezclar = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);   // de «a» hacia «b»
+const luzDe = (rgb) => rgb.map((v) => v / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4))
+  .reduce((t, v, i) => t + v * [0.2126, 0.7152, 0.0722][i], 0);
+
+function colorDeJarvis(hex) {
+  // un color elegido: con su fuerte (más claro) y su oscuro, como los de fábrica
+  const rgb = rgbDe(hex) || [41, 217, 255];
+  return {cian: hexDe(rgb), fuerte: hexDe(mezclar(rgb, [255, 255, 255], 0.45)), oscuro: hexDe(mezclar(rgb, [0, 0, 0], 0.25)),
+          rgb: rgb.join(", ")};
+}
+
+const NOMBRES_TEMA = {negro: "Oscuro", claro: "Claro", azul: "Azul", auto: "Auto"};
+const NOMBRES_COLOR = {celeste: "Celeste", rojo: "Rojo", dorado: "Dorado", verde: "Verde", violeta: "Violeta", propio: "El tuyo"};
+const PROPIAS = ["--texto", "--texto-2", "--texto-3", "--fondo", "--msg-vos", "--msg-vos-texto", "--panel", "--reactor-rgb"];
+
 function aplicarApariencia() {
-  const c = COLORES[ajustes.color] || COLORES.celeste;
   const raiz = document.documentElement;
+  const tema = Tema.resolver(ajustes.fondo || "negro");
+  let c = ajustes.color === "propio" && rgbDe(ajustes.colorPropio) ? colorDeJarvis(ajustes.colorPropio)
+    : COLORES[ajustes.color] || COLORES.celeste;
+  if (tema === "claro") {   // sobre blanco, el color de JARVIS un poco más oscuro (si no, no se lee)
+    const base = rgbDe(c.cian);
+    c = {cian: hexDe(mezclar(base, [0, 0, 0], 0.3)), fuerte: hexDe(mezclar(base, [0, 0, 0], 0.45)),
+         oscuro: hexDe(mezclar(base, [0, 0, 0], 0.15)), rgb: c.rgb};
+  }
   raiz.style.setProperty("--cian", c.cian);
   raiz.style.setProperty("--cian-fuerte", c.fuerte);
   raiz.style.setProperty("--cian-oscuro", c.oscuro);
   raiz.style.setProperty("--cian-rgb", c.rgb);
   raiz.dataset.animaciones = ajustes.animaciones || "completas";
   raiz.dataset.letra = ajustes.letra || "normal";
-  [reactorInicio].forEach((r) => { if (r && r.apariencia) r.apariencia(c.rgb, raiz.dataset.animaciones); });
-  if (typeof Tema !== "undefined") Tema.aplicar(ajustes.fondo || "negro", VERSION_APP);   // (el negro de la PC, o el azul de antes)
+  raiz.dataset.tema = tema;
+  raiz.dataset.fuente = ajustes.fuente || "jarvis";
+  raiz.dataset.esquinas = ajustes.esquinas || "redondas";
+  // lo que elegiste a mano (va encima del tema)
+  PROPIAS.forEach((v) => raiz.style.removeProperty(v));
+  raiz.style.background = document.body.style.background = "";
+  const fondo = rgbDe(ajustes.colorFondo);
+  const fondoBase = fondo || rgbDe(Tema.FONDOS[tema]);
+  if (fondo) {
+    raiz.style.setProperty("--fondo", ajustes.colorFondo);
+    raiz.style.background = document.body.style.background = ajustes.colorFondo;
+  }
+  const letras = rgbDe(ajustes.colorLetras);
+  if (letras) {
+    raiz.style.setProperty("--texto", hexDe(letras));
+    raiz.style.setProperty("--texto-2", hexDe(mezclar(letras, fondoBase, 0.3)));
+    raiz.style.setProperty("--texto-3", hexDe(mezclar(letras, fondoBase, 0.5)));
+  }
+  const mensajes = rgbDe(ajustes.colorMensajes);
+  if (mensajes) {
+    raiz.style.setProperty("--msg-vos", hexDe(mensajes));
+    raiz.style.setProperty("--msg-vos-texto", luzDe(mensajes) > 0.4 ? "#0b1218" : "#f4f8fb");
+  }
+  const tarjetas = rgbDe(ajustes.colorTarjetas);
+  if (tarjetas) raiz.style.setProperty("--panel", `rgba(${tarjetas.join(", ")}, 0.86)`);
+  const reactor = rgbDe(ajustes.colorReactor) ? rgbDe(ajustes.colorReactor).join(", ") : c.rgb;
+  raiz.style.setProperty("--reactor-rgb", reactor);
+  [reactorInicio].forEach((r) => { if (r && r.apariencia) r.apariencia(reactor, raiz.dataset.animaciones); });
+  Tema.aplicar(ajustes.fondo || "negro", VERSION_APP);   // (el negro de la PC, el claro, o el azul de antes)
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta && fondo) meta.content = ajustes.colorFondo;
+}
+
+function colorActual(clave) {
+  // el color que se ve ahora (para que el selector arranque desde ahí)
+  const css = getComputedStyle(document.documentElement);
+  const aHex = (t) => {
+    const m = /(\d+)\D+(\d+)\D+(\d+)/.exec(t || "");
+    return rgbDe(t) ? String(t).trim() : m ? hexDe([+m[1], +m[2], +m[3]]) : "#000000";
+  };
+  if (clave === "colorLetras") return aHex(css.getPropertyValue("--texto"));
+  if (clave === "colorFondo") return aHex(css.getPropertyValue("--fondo"));
+  if (clave === "colorReactor") return aHex(css.getPropertyValue("--reactor-rgb") || css.getPropertyValue("--cian-rgb"));
+  if (clave === "colorTarjetas") return aHex(css.getPropertyValue("--panel"));
+  const vos = document.querySelector(".vp-vos");
+  return aHex(vos ? getComputedStyle(vos).backgroundColor : "");
+}
+
+function pintarApariencia() {
+  document.querySelectorAll("#ajuste-tema [data-fondo]").forEach((b) => b.classList.toggle("activo", b.dataset.fondo === (ajustes.fondo || "negro")));
+  document.querySelectorAll("#ajuste-colores [data-color]").forEach((x) => {
+    x.classList.toggle("elegido", x.dataset.color === (ajustes.color || "celeste"));
+  });
+  $("ajuste-color-propio").value = rgbDe(ajustes.colorPropio) ? ajustes.colorPropio : "#29d9ff";
+  document.querySelectorAll("#colores-propios .color-fila").forEach((f) => {
+    const propio = !!rgbDe(ajustes[f.dataset.clave]);
+    f.classList.toggle("propio", propio);
+    f.querySelector("input").value = propio ? ajustes[f.dataset.clave] : colorActual(f.dataset.clave);
+    const auto = f.querySelector(".color-auto");
+    auto.textContent = propio ? "↺ Auto" : "Auto";
+    auto.disabled = !propio;
+  });
+  $("ajuste-animaciones").value = ajustes.animaciones || "completas";
+  $("ajuste-letra").value = ajustes.letra || "normal";
+  $("ajuste-fuente").value = ajustes.fuente || "jarvis";
+  $("ajuste-esquinas").value = ajustes.esquinas || "redondas";
+}
+
+function cambiarApariencia(cambios) {
+  Object.entries(cambios).forEach(([k, v]) => { if (v === null) delete ajustes[k]; else ajustes[k] = v; });
+  guardar("ajustes", ajustes);
+  aplicarApariencia();
+  pintarApariencia();
+}
+
+// ---------- Ajustes como un apartado: la portada (cómo está todo) y cada sección entera ----------
+
+const ICONOS_AJUSTES = {
+  voz: '<path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
+  respuestas: '<path d="M4 5h16v11H8l-4 4z"/><path d="M8 9h8M8 12h5"/>',
+  ias: '<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/>',
+  avisos: '<path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 20a2 2 0 0 0 4 0"/>',
+  apariencia: '<circle cx="12" cy="12" r="9"/><circle cx="8" cy="10" r="1.3"/><circle cx="12" cy="7.5" r="1.3"/><circle cx="16" cy="10" r="1.3"/><path d="M12 21a3 3 0 0 1 0-6h2a3 3 0 0 0 3-3"/>',
+  cerebro: '<path d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 5 3 3 0 0 0 2 5 3 3 0 0 0 6 1V5a3 3 0 0 0-3-1z"/><path d="M15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 5 3 3 0 0 1-2 5 3 3 0 0 1-6 1"/>',
+  hey: '<path d="M3 12h2M7 8v8M11 5v14M15 8v8M19 11v2"/>',
+};
+
+function resumenSeccion(id) {
+  const b = ajustesBot;
+  switch (id) {
+    case "grupo-voz":
+      return ({auto: "Lee cuando le hablás", siempre: "Lee siempre", nunca: "No lee en voz alta"}[ajustes.leer] || "")
+        + " · " + Number(ajustes.velocidad || 1).toFixed(2) + "x";
+    case "grupo-respuestas":
+      return b ? (b.nombre ? "Te llama " + b.nombre : "Sin nombre") + " · respuestas "
+        + ({corto: "cortas", normal: "normales", largo: "detalladas"}[b.estilo || "normal"]) : "Necesita el bot actualizado";
+    case "grupo-ias": return "Si Gemini no puede, contesta otra (gratis)";
+    case "grupo-avisos":
+      return b ? ({app: "En la app", telegram: "En Telegram", ambos: "En la app y Telegram"}[b.avisos_en || "telegram"])
+        + " · buen día " + (Number(b.buen_dia) < 0 ? "no" : "a las " + (b.buen_dia === undefined ? 8 : b.buen_dia)) : "Necesita el bot actualizado";
+    case "grupo-apariencia":
+      return NOMBRES_TEMA[ajustes.fondo || "negro"] + " · " + NOMBRES_COLOR[ajustes.color || "celeste"]
+        + " · letra " + (ajustes.letra || "normal");
+    case "grupo-cerebro": return "Para contestar sin internet";
+    case "grupo-hey": return "Se despierta " + ({alta: "fácil", normal: "normal", baja: "difícil"}[ajustes.sensibilidad || "normal"]);
+  }
+  return "";
+}
+
+function pintarResumenAjustes() {
+  $("res-tema").textContent = NOMBRES_TEMA[ajustes.fondo || "negro"];
+  $("res-color").title = NOMBRES_COLOR[ajustes.color || "celeste"];
+  $("res-voz").textContent = Number(ajustes.velocidad || 1).toFixed(2) + "x";
+  $("res-version").textContent = "VERSIÓN " + (Nativo.hay ? Nativo.info.version || VERSION_APP : VERSION_APP);
+  const lista = $("ajustes-secciones");
+  lista.innerHTML = "";
+  document.querySelectorAll("#ajustes details.grupo").forEach((g) => {
+    if (g.closest("#ajustes-nativos") && !Nativo.hay) return;
+    const fila = document.createElement("button");
+    fila.type = "button";
+    fila.className = "item seccion-fila";
+    fila.dataset.seccion = g.id;
+    const icono = document.createElement("span");
+    icono.className = "seccion-icono";
+    icono.innerHTML = `<svg viewBox="0 0 24 24">${ICONOS_AJUSTES[g.dataset.icono] || ""}</svg>`;
+    const texto = document.createElement("span");
+    texto.className = "texto";
+    const nombre = document.createElement("b");
+    nombre.textContent = g.querySelector("summary").textContent;
+    const detalle = document.createElement("span");
+    detalle.className = "para";
+    detalle.textContent = resumenSeccion(g.id);
+    texto.append(nombre, detalle);
+    fila.append(icono, texto);
+    fila.insertAdjacentHTML("beforeend", '<svg class="chevron" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg>');
+    fila.onclick = () => seccionAjustes(g.id);
+    lista.appendChild(fila);
+  });
+}
+
+function seccionAjustes(id) {
+  // null: la portada. Con una sección: solo esa, entera, y la flecha vuelve a la portada
+  const hoja = $("ajustes");
+  document.querySelectorAll("#ajustes details.grupo").forEach((g) => {
+    g.classList.toggle("abierta", g.id === id);
+    g.open = g.id === id;
+  });
+  if (id) hoja.dataset.seccion = id;
+  else delete hoja.dataset.seccion;
+  $("ajustes-titulo").textContent = id ? $(id).querySelector("summary").textContent.toUpperCase() : "AJUSTES";
+  $("ajustes-atras").setAttribute("aria-label", id ? "Volver a Ajustes" : "Cerrar Ajustes");
+  if (!id) pintarResumenAjustes();
+  hoja.scrollTop = 0;
+}
+
+// ---------- Volver: la flecha de arriba y el botón atrás llevan a donde estabas antes ----------
+
+let historial = [];   // las pantallas por las que pasaste (la última, al final; sin repetir)
+
+function volver() {
+  // true si había adónde volver (si no, el botón atrás de Android deja la app)
+  if (chatsAbierto()) { cerrarChats(); return true; }
+  if (!$("visor").hidden) { cerrarVisor(); return true; }
+  if ($("ajustes").open) {
+    if ($("ajustes").dataset.seccion) seccionAjustes(null);
+    else $("ajustes").close();
+    return true;
+  }
+  if (llamada.activa) { colgar(); return true; }
+  if (burbuja.activa) { cerrarBurbuja(); return true; }
+  const anterior = historial.pop();
+  if (anterior && anterior !== vistaActual) { cambiarVista(anterior, true); return true; }
+  if (vistaActual !== "inicio") { cambiarVista("inicio", true); return true; }
+  if (ocupado) { Voz.callar(); Oido.cancelar(); Cerebro.parar(); return true; }
+  return false;
+}
+
+function pintarAtras() {
+  $("boton-atras").hidden = vistaActual === "inicio";
 }
 
 // ---------- Pestañas, ajustes e instalar ----------
 
-function cambiarVista(nombre) {
+function cambiarVista(nombre, volviendo) {
+  // volviendo: la flecha o el botón atrás (no se anota en el historial)
   if (nombre === "pc" && !tienePc()) nombre = "inicio";
   if (["almacen", "boveda"].includes(nombre) && !(Nativo.hay && window.JarvisNativo.almacenamiento)) nombre = "inicio";
+  if (nombre === "inicio") historial = [];   // (en Inicio no hay más atrás)
+  else if (!volviendo && nombre !== vistaActual) historial = historial.filter((v) => v !== vistaActual && v !== nombre)
+    .concat(vistaActual).slice(-20);
   vistaActual = nombre;
+  pintarAtras();
   if (nombre !== "boveda") Boveda.pin = null;   // (saliste del apartado de la bóveda: la próxima vez, el código)
   document.querySelectorAll(".vista").forEach((v) => v.classList.toggle("activa", v.id === "vista-" + nombre));
   document.querySelectorAll(".pestana[data-vista]").forEach((b) => b.classList.toggle("activa", b.dataset.vista === nombre));
@@ -4670,13 +4978,12 @@ function abrirAjustes() {
     $("ajuste-buen-dia").value = String(b.buen_dia === undefined ? 8 : b.buen_dia);
     $("ajuste-noche").checked = b.noche !== false;
     $("ajuste-cuidados").checked = b.cuidados !== false;
+    $("ajuste-dormir").value = String(b.dormir || 23.5);
   }
   document.querySelectorAll("#ajuste-colores [data-color]").forEach((x) => {
     x.classList.toggle("elegido", x.dataset.color === (ajustes.color || "celeste"));
   });
-  $("ajuste-animaciones").value = ajustes.animaciones || "completas";
-  $("ajuste-letra").value = ajustes.letra || "normal";
-  $("ajuste-fondo").value = ajustes.fondo || "negro";
+  pintarApariencia();
   $("ajuste-vibrar").checked = ajustes.vibrar !== false;
   $("ajuste-avisos").checked = ajustes.avisos !== false;
   $("ajuste-sensibilidad").value = ajustes.sensibilidad || "normal";
@@ -4694,6 +5001,7 @@ function abrirAjustes() {
   $("ajustes-info").textContent = (Nativo.hay ? `App de Android ${Nativo.info.version || VERSION_APP}. ` : `Versión ${VERSION_APP}. `)
     + (puedeOir ? "Te escucha con el reconocimiento de voz del celular."
        : "Este celular no tiene reconocimiento de voz: graba y JARVIS lo pasa a texto.");
+  seccionAjustes(null);
   $("ajustes").showModal();
 }
 
@@ -4818,14 +5126,7 @@ const sinOidoSinInternet = (r) => Nativo.hay && !hayInternet() && ["network", "l
 window.JarvisApp = {
   atras() {
     // El botón atrás de Android: true si la app lo usó (si no, la app queda abierta por detrás)
-    if (chatsAbierto()) { cerrarChats(); return true; }
-    if (!$("visor").hidden) { cerrarVisor(); return true; }
-    if ($("ajustes").open) { $("ajustes").close(); return true; }
-    if (llamada.activa) { colgar(); return true; }
-    if (burbuja.activa) { cerrarBurbuja(); return true; }
-    if (vistaActual !== "inicio") { cambiarVista("inicio"); return true; }
-    if (ocupado) { Voz.callar(); Oido.cancelar(); Cerebro.parar(); return true; }
-    return false;
+    return volver();
   },
 };
 
@@ -5000,6 +5301,20 @@ function conectarBotones() {
 
   $("boton-ajustes").onclick = abrirAjustes;
   $("ajustes").addEventListener("close", guardarAjustes);
+  $("ajustes").addEventListener("close", () => seccionAjustes(null));
+  $("ajustes-atras").onclick = () => volver();
+  $("boton-atras").onclick = () => volver();
+  if (!Nativo.hay) {   // en el navegador (la web app): el gesto o el botón atrás del celular también vuelve
+    history.replaceState({jarvis: "base"}, "");
+    history.pushState({jarvis: "app"}, "");
+    addEventListener("popstate", () => {
+      if (volver()) history.pushState({jarvis: "app"}, "");
+      else history.back();
+    });
+  }
+  if (window.matchMedia) {   // el tema «Auto»: si el celular pasa a claro u oscuro, la app también
+    matchMedia("(prefers-color-scheme: light)").addEventListener("change", () => { if (ajustes.fondo === "auto") aplicarApariencia(); });
+  }
   $("ajuste-velocidad").oninput = () => { $("velocidad-valor").textContent = Number($("ajuste-velocidad").value).toFixed(2) + "x"; };
   $("ajuste-tono").oninput = () => { $("tono-valor").textContent = Number($("ajuste-tono").value).toFixed(2); };
   // lo que vale también para el bot (se guarda allá, así sirve para Telegram)
@@ -5012,6 +5327,8 @@ function conectarBotones() {
     Number($("ajuste-buen-dia").value) < 0 ? "Listo: sin buen día." : `Listo: el buen día, a las ${$("ajuste-buen-dia").value}.`);
   $("ajuste-noche").onchange = () => guardarAjustesBot({noche: $("ajuste-noche").checked}, "Listo.");
   $("ajuste-cuidados").onchange = () => guardarAjustesBot({cuidados: $("ajuste-cuidados").checked}, "Listo.");
+  $("ajuste-dormir").onchange = () => guardarAjustesBot({dormir: Number($("ajuste-dormir").value)},
+    "Listo: si seguís despierto después de esa hora, te mando a dormir.");
   // la apariencia (se ve al toque)
   document.querySelectorAll("#ajuste-colores [data-color]").forEach((x) => {
     x.onclick = () => {
@@ -5031,10 +5348,20 @@ function conectarBotones() {
     guardar("ajustes", ajustes);
     aplicarApariencia();
   };
-  $("ajuste-fondo").onchange = () => {
-    ajustes.fondo = $("ajuste-fondo").value;
-    guardar("ajustes", ajustes);
-    aplicarApariencia();
+  document.querySelectorAll("#ajuste-tema [data-fondo]").forEach((b) => {
+    b.onclick = () => cambiarApariencia({fondo: b.dataset.fondo});
+  });
+  $("ajuste-color-propio").oninput = () => cambiarApariencia({color: "propio", colorPropio: $("ajuste-color-propio").value});
+  document.querySelectorAll("#colores-propios .color-fila").forEach((f) => {
+    f.querySelector("input").oninput = (e) => cambiarApariencia({[f.dataset.clave]: e.target.value});
+    f.querySelector(".color-auto").onclick = () => cambiarApariencia({[f.dataset.clave]: null});
+  });
+  $("ajuste-fuente").onchange = () => cambiarApariencia({fuente: $("ajuste-fuente").value});
+  $("ajuste-esquinas").onchange = () => cambiarApariencia({esquinas: $("ajuste-esquinas").value});
+  $("apariencia-de-fabrica").onclick = () => {
+    cambiarApariencia({fondo: null, color: null, colorPropio: null, colorLetras: null, colorFondo: null, colorReactor: null,
+                       colorMensajes: null, colorTarjetas: null, fuente: null, esquinas: null, letra: null, animaciones: null});
+    avisar("Listo: la apariencia, como venía.", 3);
   };
   $("ajuste-placa").onchange = () => {   // el cerebro sin internet: con la placa de video (rápido) o el procesador
     if (window.JarvisNativo.cerebroPlaca) window.JarvisNativo.cerebroPlaca($("ajuste-placa").checked ? "auto" : "cpu");
@@ -5844,9 +6171,14 @@ async function hacerOMasTarde(accion, datos, segundos = 40) {
   return {cola: true};
 }
 
+// lo que se cambió en Mi día y el bot todavía no contestó: se vuelve a aplicar a cada cosa que llega del bot (si no,
+// al anotar o tildar varios seguidos, la respuesta del primero borraba de la pantalla los que seguían en camino)
+const diaEnCamino = new Set();
+
 function conLoDeLaCola(d) {
   // lo que mandó el bot + lo que todavía espera en la cola (si no, al refrescar desaparecía lo anotado sin internet)
   if (!d || !d.pendientes) return d;
+  diaEnCamino.forEach((aplicar) => aplicar(d));
   cola.filter((c) => c.silencioso).forEach((c) => {
     const x = c.datos || {};
     if (c.accion === "app_pendiente" && x.que === "agregar") {
@@ -5876,8 +6208,9 @@ async function cambiarDia(accion, datos, local, aviso) {
     pintarDia();
   }
   if (deLaCola) return avisar(aviso || "Listo.", 2);
+  diaEnCamino.add(local);
   try {
-    const x = await hacerOMasTarde(accion, datos);
+    const x = await hacerOMasTarde(accion, datos).finally(() => diaEnCamino.delete(local));
     if (x.cola) return avisar("Sin internet: ya lo cambié acá y se lo paso al bot cuando vuelva.", 3);
     if (!x.r.ok) throw new Error(x.r.error || "No pude.");
     datosDia = conLoDeLaCola(x.r);
@@ -5900,14 +6233,18 @@ function botonBorrarYa(pregunta, hacer) {
 }
 
 async function agregarPendiente(texto) {
-  const ref = "cola" + Date.now().toString(36);
+  const ref = "cola" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);   // (varios en el mismo instante)
+  const aplicar = (d) => {
+    if (!d.pendientes.some((p) => p.id === ref || p.texto === texto)) d.pendientes.push({id: ref, texto: texto + " ⏳", para: null});
+  };
   if (datosDia) {
-    datosDia.pendientes.push({id: ref, texto: texto + " ⏳", para: null});
+    aplicar(datosDia);
     guardar("dia", datosDia);
     pintarDia();
   }
+  diaEnCamino.add(aplicar);
   try {
-    const x = await hacerOMasTarde("app_pendiente", {que: "agregar", texto: texto, ref: ref});
+    const x = await hacerOMasTarde("app_pendiente", {que: "agregar", texto: texto, ref: ref}).finally(() => diaEnCamino.delete(aplicar));
     if (x.cola) return avisar("Sin internet: ya lo anoté acá (⏳) y se lo paso al bot cuando vuelva.", 3);
     if (!x.r.ok) throw new Error(x.r.error || "No pude.");
     datosDia = conLoDeLaCola(x.r);

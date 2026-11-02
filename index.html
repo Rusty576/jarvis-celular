@@ -48,6 +48,9 @@
 </section>
 
 <header class="cabecera">
+  <button id="boton-atras" class="icono-boton chico atras" aria-label="Volver" hidden>
+    <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>
+  </button>
   <img src="iconos/icono-192.png" alt="" class="logo" id="logo">
   <div class="titulo">
     <b>J.A.R.V.I.S.</b>
@@ -486,14 +489,39 @@
   </div>
 </section>
 
-<!-- Ajustes: por grupos que se abren y se cierran -->
-<dialog id="ajustes" class="hoja">
+<!-- Ajustes: como un apartado (igual que Finanzas): arriba cómo está todo, y las secciones; cada una se abre entera,
+     con la flecha para volver -->
+<dialog id="ajustes" class="hoja pagina">
   <form method="dialog">
-    <h2>AJUSTES</h2>
+    <div class="ajustes-cabeza">
+      <button type="button" id="ajustes-atras" class="icono-boton chico" aria-label="Volver">
+        <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>
+      </button>
+      <h2 id="ajustes-titulo">AJUSTES</h2>
+    </div>
     <p class="ayuda" id="ajustes-bot-viejo" hidden>Algunas opciones (los avisos, cómo te llamo) necesitan el bot
       actualizado: decile a JARVIS en la PC «actualizá el bot del celular».</p>
+    <div id="ajustes-inicio">
+      <div class="tarjeta fin-mes ajustes-resumen">
+        <div class="fin-cifras">
+          <div><small>TEMA</small><b id="res-tema">—</b></div>
+          <div><small>COLOR</small><b id="res-color"><i class="res-punto"></i></b></div>
+          <div><small>VOZ</small><b id="res-voz">—</b></div>
+        </div>
+        <p class="fin-mes-nombre" id="res-version"></p>
+      </div>
+      <h2>PERSONALIZAR</h2>
+      <div id="ajustes-secciones" class="lista"></div>
+      <h2>MÁS</h2>
+      <div class="hoja-fila otros">
+        <button type="button" id="ver-pc" class="boton">La PC</button>
+        <button type="button" id="ver-almacen" class="boton solo-nativa">💾 Almacenamiento</button>
+        <button type="button" id="reportar" class="boton">Reportar un problema</button>
+        <button type="button" id="ajuste-actualizar" class="boton solo-nativa">Buscar actualización</button>
+      </div>
+    </div>
 
-    <details class="grupo" open>
+    <details class="grupo" id="grupo-voz" data-icono="voz">
       <summary>Voz</summary>
       <label class="opcion">Leer las respuestas en voz alta (en la charla)
         <select id="ajuste-leer">
@@ -516,7 +544,7 @@
       </div>
     </details>
 
-    <details class="grupo">
+    <details class="grupo" id="grupo-respuestas" data-icono="respuestas">
       <summary>Respuestas</summary>
       <label class="opcion">Cómo te llamo
         <input id="ajuste-nombre" class="del-bot" maxlength="30" placeholder="Tu nombre (o «señor», como Tony)" autocomplete="off">
@@ -537,7 +565,7 @@
       </label>
     </details>
 
-    <details class="grupo" id="grupo-ias">
+    <details class="grupo" id="grupo-ias" data-icono="ias">
       <summary>IAs de repuesto</summary>
       <p class="ayuda">Si Gemini se queda sin cupo o anda lento, JARVIS contesta con otra IA. <b>Todas son gratis y
         ninguna pide tarjeta.</b> Gemma ya anda sola (usa tu misma clave de Gemini). Las otras, si querés más: conseguí la
@@ -547,7 +575,7 @@
       <div id="ias-lista" class="ias-lista"></div>
     </details>
 
-    <details class="grupo">
+    <details class="grupo" id="grupo-avisos" data-icono="avisos">
       <summary>Avisos</summary>
       <label class="opcion">Dónde te aviso (el buen día, lo de la PC, los recordatorios)
         <select id="ajuste-avisos-en" class="del-bot">
@@ -570,27 +598,73 @@
       <label class="interruptor"><input type="checkbox" id="ajuste-noche" class="del-bot">
         <span>A la noche, lo que tenés mañana</span></label>
       <label class="interruptor"><input type="checkbox" id="ajuste-cuidados" class="del-bot">
-        <span>Cuidarte: si jugás de madrugada o muchas horas seguidas</span></label>
+        <span>Cuidarme como un papá: mis pendientes, lo de hoy y si sigo despierto muy tarde</span></label>
+      <label class="opcion">A qué hora me mandás a dormir (si sigo despierto)
+        <select id="ajuste-dormir" class="del-bot">
+          <option value="22">A las 22</option>
+          <option value="23">A las 23</option>
+          <option value="23.5">A las 23:30</option>
+          <option value="24">A las 0</option>
+          <option value="25">A la 1</option>
+        </select>
+      </label>
       <label class="interruptor solo-nativa"><input type="checkbox" id="ajuste-avisos">
         <span>Los recordatorios suenan desde el celular (aunque no haya internet)</span></label>
       <p class="ayuda solo-nativa">Con la app cerrada, los avisos llegan como notificación (puede tardar unos minutos).</p>
     </details>
 
-    <details class="grupo">
+    <details class="grupo" id="grupo-apariencia" data-icono="apariencia">
       <summary>Apariencia</summary>
-      <div class="opcion">Color
+      <!-- cómo queda, mientras lo cambiás -->
+      <div class="vista-previa" aria-hidden="true">
+        <div class="vp-cabeza"><i class="vp-reactor"></i><b>J.A.R.V.I.S.</b><small>en línea</small></div>
+        <div class="vp-msg vp-jarvis">Buenas. ¿En qué te ayudo?</div>
+        <div class="vp-msg vp-vos">Mostrame mi día</div>
+        <div class="vp-pie"><span class="vp-boton">HABLAR</span><span class="vp-chip">Finanzas</span></div>
+      </div>
+      <div class="opcion">Tema
+        <div class="fin-tipo tema-opciones" id="ajuste-tema" role="tablist">
+          <button type="button" data-fondo="negro">Oscuro</button>
+          <button type="button" data-fondo="claro">Claro</button>
+          <button type="button" data-fondo="azul">Azul</button>
+          <button type="button" data-fondo="auto">Auto</button>
+        </div>
+      </div>
+      <div class="opcion">Color de JARVIS
         <div class="colores" id="ajuste-colores">
           <button type="button" data-color="celeste" aria-label="Celeste"></button>
           <button type="button" data-color="rojo" aria-label="Rojo"></button>
           <button type="button" data-color="dorado" aria-label="Dorado"></button>
           <button type="button" data-color="verde" aria-label="Verde"></button>
           <button type="button" data-color="violeta" aria-label="Violeta"></button>
+          <label class="color-propio" data-color="propio" aria-label="Elegir otro color">
+            <input type="color" id="ajuste-color-propio" value="#29d9ff">
+          </label>
         </div>
       </div>
-      <label class="opcion">Fondo
-        <select id="ajuste-fondo">
-          <option value="negro">Negro (como JARVIS en la PC)</option>
-          <option value="azul">Azul (el de antes)</option>
+      <h3 class="titulo-ajuste">A TU GUSTO</h3>
+      <div class="colores-propios" id="colores-propios">
+        <div class="color-fila" data-clave="colorLetras"><span>Las letras</span>
+          <input type="color" aria-label="Color de las letras"><button type="button" class="color-auto">Auto</button></div>
+        <div class="color-fila" data-clave="colorFondo"><span>El fondo</span>
+          <input type="color" aria-label="Color del fondo"><button type="button" class="color-auto">Auto</button></div>
+        <div class="color-fila" data-clave="colorReactor"><span>El reactor</span>
+          <input type="color" aria-label="Color del reactor"><button type="button" class="color-auto">Auto</button></div>
+        <div class="color-fila" data-clave="colorMensajes"><span>Tus mensajes</span>
+          <input type="color" aria-label="Color de tus mensajes"><button type="button" class="color-auto">Auto</button></div>
+        <div class="color-fila" data-clave="colorTarjetas"><span>Las tarjetas</span>
+          <input type="color" aria-label="Color de las tarjetas"><button type="button" class="color-auto">Auto</button></div>
+      </div>
+      <label class="opcion">Tipo de letra
+        <select id="ajuste-fuente">
+          <option value="jarvis">JARVIS (como en la PC)</option>
+          <option value="simple">Simple (más fácil de leer)</option>
+        </select>
+      </label>
+      <label class="opcion">Las esquinas
+        <select id="ajuste-esquinas">
+          <option value="redondas">Redondeadas</option>
+          <option value="rectas">Rectas (más HUD)</option>
         </select>
       </label>
       <label class="opcion">Animaciones
@@ -608,11 +682,14 @@
         </select>
       </label>
       <label class="interruptor solo-nativa"><input type="checkbox" id="ajuste-vibrar"><span>Vibrar al tocar</span></label>
+      <div class="hoja-fila">
+        <button type="button" id="apariencia-de-fabrica" class="boton">Volver a como venía</button>
+      </div>
     </details>
 
     <!-- solo en la app de Android -->
     <div id="ajustes-nativos" hidden>
-      <details class="grupo">
+      <details class="grupo" id="grupo-cerebro" data-icono="cerebro">
         <summary>Cerebro sin internet</summary>
         <!-- el cerebro sin internet: JARVIS piensa en el celular (como en la PC) -->
         <div id="cerebro-caja" class="cerebro-caja" hidden>
@@ -634,7 +711,7 @@
           </div>
         </div>
       </details>
-      <details class="grupo">
+      <details class="grupo" id="grupo-hey" data-icono="hey">
       <summary>«Hey Jarvis» y el asistente</summary>
       <label class="opcion">Qué tan fácil se despierta
         <select id="ajuste-sensibilidad">
@@ -674,12 +751,6 @@
         <a id="bajar-android" class="boton" href="#">Bajar la app</a>
         <button type="button" id="conectar-android" class="boton">Conectarla a este JARVIS</button>
       </div>
-    </div>
-    <div class="hoja-fila otros">
-      <button type="button" id="ver-pc" class="boton">La PC</button>
-      <button type="button" id="ver-almacen" class="boton solo-nativa">💾 Almacenamiento</button>
-      <button type="button" id="reportar" class="boton">Reportar un problema</button>
-      <button type="button" id="ajuste-actualizar" class="boton solo-nativa">Buscar actualización</button>
     </div>
     <p class="ayuda" id="ajustes-info"></p>
     <div class="hoja-botones">

@@ -166,7 +166,8 @@ h2 { font-family: var(--titulo); font-size: 12px; font-weight: 700; letter-spaci
 .msg .quien { display: block; font-family: var(--titulo); font-size: 9px; font-weight: 700; letter-spacing: 0.25em;
               margin-bottom: 3px; color: var(--cian); }
 .msg.jarvis { align-self: flex-start; background: var(--panel); border: 1px solid var(--panel-borde); border-bottom-left-radius: 4px; }
-.msg.vos { align-self: flex-end; background: #0f3550; border: 1px solid rgba(122, 233, 255, 0.25); border-bottom-right-radius: 4px; }
+.msg.vos { align-self: flex-end; background: var(--msg-vos, #0f3550); color: var(--msg-vos-texto, inherit);
+           border: 1px solid rgba(122, 233, 255, 0.25); border-bottom-right-radius: 4px; }
 .msg.vos .quien { color: var(--texto-2); text-align: right; }
 .msg.aviso { align-self: center; background: rgba(255, 181, 71, 0.08); border: 1px solid rgba(255, 181, 71, 0.35);
              color: var(--ambar); font-size: 15px; text-align: center; max-width: 92%; }
@@ -1045,3 +1046,90 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: non
   .boton:active, .icono-boton:active, .chip:active, .accion:active, .est-opcion:active, .protocolo:active,
   .item .borrar:active, .item .tilde:active, .pestana:active, .est-flash:active { transform: none; }
 }
+
+/* ---------- Ajustes como un apartado (igual que Finanzas): la portada y cada sección entera ---------- */
+.hoja.pagina { width: 100%; max-width: none; height: 100dvh; max-height: none; margin: 0; border: none; border-radius: 0;
+               padding: var(--arriba) 16px calc(18px + var(--abajo)); background: var(--fondo); }
+.hoja.pagina::before { display: none; }
+.hoja.pagina[open] { animation: entrar-pagina 0.2s ease-out; }
+@keyframes entrar-pagina { from { transform: translateX(28px); opacity: 0; } }
+.ajustes-cabeza { position: sticky; top: calc(0px - var(--arriba)); z-index: 3; display: flex; align-items: center; gap: 10px;
+                  margin: 0 -16px 10px; padding: calc(10px + var(--arriba)) 16px 10px; background: var(--fondo);
+                  border-bottom: 1px solid var(--panel-borde); }
+.ajustes-cabeza h2 { margin: 0; text-wrap: balance; }
+.ajustes-resumen { margin-top: 4px; }
+.ajustes-resumen .fin-cifras b { font-size: 17px; }
+.res-punto { display: inline-block; width: 20px; height: 20px; border-radius: 50%; vertical-align: middle; background: var(--cian);
+             box-shadow: 0 0 10px rgba(var(--cian-rgb), 0.6); }
+.seccion-fila { width: 100%; min-height: 60px; text-align: left; border: 1px solid var(--panel-borde); color: var(--texto);
+                transition-property: background-color, transform; transition-duration: 0.15s; }
+.seccion-fila:active { background: var(--cian-tenue); transform: scale(0.98); }
+.seccion-fila .texto b { display: block; font-weight: 700; font-size: 16px; }
+.seccion-fila .para { text-wrap: pretty; }
+.seccion-icono { flex: none; width: 40px; height: 40px; display: grid; place-items: center; border-radius: 12px;
+                 background: var(--cian-tenue); color: var(--cian); }
+.seccion-icono svg { width: 21px; height: 21px; }
+.seccion-fila .chevron { flex: none; width: 18px; height: 18px; color: var(--texto-3); }
+#ajustes.pagina:not([data-seccion]) details.grupo, #ajustes.pagina[data-seccion] details.grupo:not(.abierta) { display: none; }
+#ajustes.pagina[data-seccion] #ajustes-inicio, #ajustes.pagina[data-seccion] .hoja-botones,
+#ajustes.pagina[data-seccion] #ajustes-info { display: none; }
+#ajustes.pagina details.grupo.abierta { margin: 0; border: none; background: none; }
+#ajustes.pagina details.grupo.abierta > summary { display: none; }
+#ajustes.pagina details.grupo.abierta > :not(summary) { margin-left: 0; margin-right: 0; }
+
+/* la flecha para volver (arriba a la izquierda), donde haya adónde volver */
+.cabecera .atras { margin-right: -4px; border-color: transparent; background: none; color: var(--cian); }
+
+/* ---------- Apariencia a tu gusto ---------- */
+.tema-opciones { display: flex; width: 100%; }
+.tema-opciones button { flex: 1; padding: 8px 4px; }
+.colores { flex-wrap: wrap; }
+.colores .color-propio { position: relative; width: 38px; height: 38px; border-radius: 50%; border: 2px solid transparent;
+                         overflow: hidden; cursor: pointer;
+                         background: conic-gradient(#ff4d5e, #ffc24a, #3dffa8, #29d9ff, #a77bff, #ff4d5e); }
+.colores .color-propio.elegido { border-color: var(--texto); box-shadow: 0 0 0 3px rgba(var(--cian-rgb), 0.35); }
+.colores .color-propio input { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; border: none; opacity: 0;
+                               cursor: pointer; }
+.colores-propios { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+.color-fila { display: flex; align-items: center; gap: 10px; padding: 7px 8px 7px 14px; border-radius: 12px;
+              background: var(--panel); border: 1px solid var(--panel-borde); color: var(--texto-2); }
+.color-fila span { flex: 1; min-width: 0; }
+.color-fila.propio span { color: var(--texto); font-weight: 600; }
+.color-fila input[type=color] { flex: none; width: 46px; height: 34px; padding: 0; border: 1px solid var(--panel-borde);
+                                border-radius: 9px; background: none; cursor: pointer; }
+.color-fila input[type=color]::-webkit-color-swatch-wrapper { padding: 3px; }
+.color-fila input[type=color]::-webkit-color-swatch { border: none; border-radius: 6px; }
+.color-fila .color-auto { flex: none; min-width: 64px; min-height: 34px; padding: 6px 10px; border-radius: 999px;
+                          border: 1px solid var(--panel-borde); background: none; color: var(--texto-3); font-size: 13px; }
+.color-fila.propio .color-auto { color: var(--cian); border-color: var(--cian); }
+.color-fila .color-auto:disabled { opacity: 0.6; }
+/* cómo queda (arriba de todo en Apariencia) */
+.vista-previa { display: flex; flex-direction: column; gap: 8px; margin: 2px 0 16px; padding: 12px; border-radius: 16px;
+                background: var(--fondo); border: 1px solid var(--panel-borde); }
+.vp-cabeza { display: flex; align-items: center; gap: 8px; }
+.vp-cabeza b { font-family: var(--titulo); font-size: 12px; font-weight: 900; letter-spacing: 0.25em; color: var(--cian-fuerte); }
+.vp-cabeza small { margin-left: auto; font-size: 12px; color: var(--texto-3); }
+.vp-reactor { width: 24px; height: 24px; border-radius: 50%;
+              background: radial-gradient(circle, #fff 0 16%, rgb(var(--reactor-rgb, var(--cian-rgb))) 30%,
+                          rgba(var(--reactor-rgb, var(--cian-rgb)), 0.18) 62%, transparent 72%);
+              box-shadow: 0 0 12px rgba(var(--reactor-rgb, var(--cian-rgb)), 0.7); }
+.vp-msg { max-width: 80%; padding: 8px 12px; border-radius: 14px; font-size: 15px; line-height: 1.3; }
+.vp-jarvis { align-self: flex-start; background: var(--panel); border: 1px solid var(--panel-borde); color: var(--texto);
+             border-bottom-left-radius: 4px; }
+.vp-vos { align-self: flex-end; background: var(--msg-vos, #0f3550); color: var(--msg-vos-texto, var(--texto));
+          border-bottom-right-radius: 4px; }
+.vp-pie { display: flex; align-items: center; gap: 8px; }
+.vp-boton { padding: 6px 14px; border-radius: 999px; background: var(--cian); color: #021018; font-family: var(--titulo);
+            font-size: 11px; font-weight: 700; letter-spacing: 0.2em; }
+.vp-chip { padding: 5px 12px; border-radius: 999px; border: 1px solid var(--panel-borde); color: var(--texto-2); font-size: 13px; }
+
+/* el tipo de letra: la de JARVIS o una simple (la del celular), más fácil de leer */
+html[data-fuente=simple] { --titulo: system-ui, "Segoe UI", Roboto, sans-serif; --cuerpo: system-ui, "Segoe UI", Roboto, sans-serif; }
+html[data-fuente=simple] h2, html[data-fuente=simple] .titulo b { letter-spacing: 0.12em; }
+/* las esquinas rectas (más HUD) */
+html[data-esquinas=rectas] :is(.tarjeta, .item, .msg, .boton, .grupo, .chip, .accion, .fila-agregar input, .vp-msg, .color-fila,
+  .tarjeta-confirmar, .tarjeta-archivo, .barra textarea, .seccion-icono, .fin-form input, .fin-form select, .opcion select) {
+  border-radius: 3px; }
+/* el tema claro: los detalles que la conversión no puede saber */
+html[data-tema=claro] .logo { filter: none; }
+html[data-tema=claro] .hoja::backdrop { background: rgba(10, 20, 30, 0.35); }
