@@ -15,7 +15,7 @@
 // ============================================================
 "use strict";
 
-const VERSION_APP = "2026.11.01.6";
+const VERSION_APP = "2026.11.02.1";
 const ANDROID_WEB = "https://rusty576.github.io/jarvis-celular/android/";   // el APK y su version.json
 const $ = (id) => document.getElementById(id);
 const Reco = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -1217,11 +1217,19 @@ async function compartirImagen(im) {
 
 async function otraVersion(im) {
   // la misma descripción, otra semilla: otra imagen parecida (sin gastar Gemini)
-  // (la dibuja Pollinations directo desde el celular: no hace falta pasar por el bot)
+  // (por el bot: Cloudflare, FLUX / Lucid Origin, mucho mejores; si el bot no puede, Pollinations desde el celular)
   if (!hayInternet()) return avisar("Para hacer otra versión hace falta internet.", 4);
   cambiarVista("charla");
-  const imagenes = await prepararImagenes([{tipo: "imagen_web", src: urlPollinations(im.prompt, im.formato), texto: "🎨 Otra versión",
-                                            prompt: im.prompt, formato: im.formato || "cuadrada"}]);
+  let acciones = null;
+  pensando(true, "Dibujando");
+  try {
+    const r = await api("app_crear_imagen", {descripcion: im.prompt, formato: im.formato || "cuadrada"}, 90);
+    if (r.ok && (r.acciones || []).length) acciones = r.acciones;
+  } catch (e) { /* (abajo, desde el celular) */ }
+  pensando(false);
+  acciones = acciones || [{tipo: "imagen_web", src: urlPollinations(im.prompt, im.formato), texto: "🎨 Otra versión",
+                           prompt: im.prompt, formato: im.formato || "cuadrada"}];
+  const imagenes = await prepararImagenes(acciones);
   agregar({quien: "jarvis", texto: "Otra versión:", imagenes: imagenes});
 }
 
@@ -2799,6 +2807,16 @@ async function mandar(texto, opciones = {}) {
       }
       return {texto: dato, tarjetas: [], acciones: [], local: true};
     }
+    if (texto && hayInternet()) {   // con internet: la nube directa desde el celular, antes que el cerebro del celular
+      const nube = await nubeDelCelular(texto);
+      if (nube) {
+        agregar({quien: "jarvis", texto: nube.texto, ia: nube.ia});
+        if (!opciones.llamada && !opciones.sinVoz && (ajustes.leer === "siempre" || (ajustes.leer === "auto" && opciones.porVoz))) {
+          Voz.decir(nube.texto);
+        }
+        return {texto: nube.texto, tarjetas: [], acciones: [], nube: true, dicho: !opciones.sinVoz && !opciones.llamada};
+      }
+    }
     if (!Cerebro.listo()) return null;
     if (motivo) agregar({quien: "aviso", texto: motivo});
     return contestarEnElCelular(texto, opciones);
@@ -2820,8 +2838,17 @@ async function mandar(texto, opciones = {}) {
   const esteEnvio = enCurso = {idApp: idApp, texto: texto, mio: mio, porVoz: !!opciones.porVoz, en: Date.now()};
   const chatDelEnvio = chatActual;
   const poner = (x) => (chatActual === chatDelEnvio ? agregar(x) : enChat(chatDelEnvio, () => agregar(x)));
+  // si el bot tarda más de 25 s, se le pregunta en paralelo a la nube directa desde el celular: si contesta antes, se ve
+  // esa respuesta; si después llega la del bot con algo hecho (una imagen, un botón, algo anotado), se ve también
+  let relojRapido = null;
+  const rapida = soloTexto && !creando ? new Promise((listo) => {
+    relojRapido = setTimeout(async () => {
+      const x = await nubeDelCelular(texto);
+      if (x && enCurso === esteEnvio) listo(x);
+    }, 25000);
+  }) : null;
   try {
-    const r = await api("app_mensaje", {texto: (contexto && texto ? contexto + " " : "") + (texto || ""), id_app: idApp,
+    const pedido = api("app_mensaje", {texto: (contexto && texto ? contexto + " " : "") + (texto || ""), id_app: idApp,
                                          chat: chatParaBot(),
                                          quitar: opciones.quitar && opciones.quitar.length ? opciones.quitar : undefined,
                                          llamada: !!opciones.llamada, audio: opciones.audio || null,
@@ -2829,6 +2856,27 @@ async function mandar(texto, opciones = {}) {
                                          archivo: archivo ? {mime: archivo.mime, datos: archivo.datos, nombre: archivo.nombre} : null,
                                          archivos: varios ? varios.map(paraElBot) : undefined},
                         archivo || varios ? 180 : creando ? 300 : conCerebro ? 85 : 100);
+    const r = rapida ? await Promise.race([pedido, rapida.then((x) => ({rapida: x}))]) : await pedido;
+    clearTimeout(relojRapido);
+    if (r.rapida) {   // contestó antes la nube directa
+      clearTimeout(precalentar);
+      if (enCurso === esteEnvio) enCurso = null;
+      pensando(false);
+      poner({quien: "jarvis", texto: r.rapida.texto, ia: r.rapida.ia});
+      pedido.then(async (tarde) => {   // (lo del bot que hizo algo, cuando llegue)
+        const hizo = tarde && tarde.ok && ((tarde.acciones || []).length || (tarde.tarjetas || []).length);
+        if (!hizo) return descartarId(idApp);
+        const imagenes = await prepararImagenes(tarde.acciones || []);
+        poner({quien: "jarvis", texto: (tarde.mensajes || []).join("\n\n"), tarjetas: tarde.tarjetas || [], acciones: tarde.acciones || [],
+               idApp: idApp, imagenes: imagenes.length ? imagenes : undefined, ia: tarde.ia || undefined});
+        hacerAcciones(tarde.acciones || []);
+      }).catch(() => descartarId(idApp));
+      if (!opciones.llamada && !opciones.sinVoz && (ajustes.leer === "siempre" || (ajustes.leer === "auto" && opciones.porVoz))) {
+        Voz.decir(r.rapida.texto);
+        return {texto: r.rapida.texto, tarjetas: [], acciones: [], dicho: true};
+      }
+      return {texto: r.rapida.texto, tarjetas: [], acciones: []};
+    }
     clearTimeout(precalentar);
     if (enCurso === esteEnvio) enCurso = null;
     if (miTurno !== Detener.turno) {   // (tocaste Detener, o lo seguiste diciendo: va junto en otro envío)
@@ -2869,6 +2917,7 @@ async function mandar(texto, opciones = {}) {
             imagenes: imagenes};
   } catch (e) {
     clearTimeout(precalentar);
+    clearTimeout(relojRapido);
     if (enCurso === esteEnvio) enCurso = null;
     pensando(false);
     if (miTurno !== Detener.turno) {
@@ -2893,6 +2942,47 @@ async function mandar(texto, opciones = {}) {
     poner({quien: "aviso", texto: (e.tipo === "sin_red" ? "⏳ " : "") + aviso});
     return {texto: aviso, tarjetas: [], acciones: [], error: true};
   }
+}
+
+// ---------- La nube directa desde el celular: cuando el bot tarda o no puede ----------
+// Antes, si Google tardaba, contestaba el cerebro del celular (más lento y más limitado). Ahora primero se le pregunta
+// directo, con la conexión del celular, a IAs gratis que no piden clave (LLM7, OVHcloud): desde el celular el cupo es
+// el tuyo (desde Google lo comparten miles y está siempre lleno). Solo charla: no puede anotar ni mandar cosas.
+const NUBES_DIRECTAS = [
+  {nombre: "LLM7", url: "https://api.llm7.io/v1/chat/completions", modelo: "gpt-oss:20b"},
+  {nombre: "OVHcloud", url: "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions", modelo: "gpt-oss-120b"},
+  {nombre: "OVHcloud", url: "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions", modelo: "Meta-Llama-3_3-70B-Instruct"},
+];
+
+async function nubeDelCelular(texto) {
+  // {texto, ia} o null
+  if (!texto || !hayInternet()) return null;
+  const nombre = ajustesBot && ajustesBot.nombre ? ajustesBot.nombre : "";
+  const sistema = "Sos JARVIS, el asistente personal" + (nombre ? " de " + nombre : "") + ". Contestá en castellano "
+    + "rioplatense, claro y al grano. Ahora no podés usar herramientas (no podés anotar, agendar, mandar ni abrir cosas): "
+    + "si te piden hacer algo así, decí que en un ratito lo hacés, cuando vuelva tu conexión completa. No inventes datos.";
+  const charla = mensajes.filter((m) => (m.quien === "vos" || m.quien === "jarvis") && m.texto).slice(-8)
+    .map((m) => ({role: m.quien === "vos" ? "user" : "assistant", content: String(m.texto).slice(0, 2000)}));
+  if (!charla.length || charla[charla.length - 1].role !== "user") charla.push({role: "user", content: texto});
+  for (const n of NUBES_DIRECTAS) {
+    const control = new AbortController();
+    const corte = setTimeout(() => control.abort(), 20000);
+    try {
+      const pedido = {model: n.modelo, messages: [{role: "system", content: sistema}].concat(charla), max_tokens: 1200,
+                      temperature: 0.6};
+      if (/gpt-oss/.test(n.modelo)) pedido.reasoning_effort = "low";
+      const r = await fetch(n.url, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(pedido),
+                                    signal: control.signal});
+      if (!r.ok) continue;
+      const d = await r.json();
+      const t = String(((d.choices || [])[0] || {}).message ? d.choices[0].message.content || "" : "")
+        .replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+      if (t) return {texto: t, ia: n.nombre + " (desde el celular)"};
+    } catch (e) { /* la siguiente */ } finally {
+      clearTimeout(corte);
+    }
+  }
+  return null;
 }
 
 // ---------- Los avisos de JARVIS (el buen día con el clima, lo que hizo la PC, los cuidados): en la charla ----------
