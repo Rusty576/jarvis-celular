@@ -87,7 +87,9 @@ html, body { background: #000; }
       estilo.id = "tema-negro";   // (el id quedó del primero: es el del tema que esté puesto)
       document.head.appendChild(estilo);
     }
-    estilo.textContent = css;
+    // (se pone al abrir, para que no se vea un destello, y app.js lo vuelve a poner: si es el mismo, no se toca;
+    // cambiarlo hacía que el navegador leyera de nuevo los 90 KB de estilos y recalculara toda la página)
+    if (estilo.textContent !== css) estilo.textContent = css;
     const meta = document.querySelector('meta[name="theme-color"]');
     if (meta) meta.content = Tema.FONDOS[tema];
   },

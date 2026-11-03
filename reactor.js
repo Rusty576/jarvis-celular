@@ -28,9 +28,13 @@ function crearReactor(canvasInicial) {
   const ambar = (a) => `rgba(255,181,71,${a})`;
   const verde = (a) => `rgba(77,255,184,${a})`;
 
-  function ajustar() {
-    const r = lienzo.getBoundingClientRect();
-    dpr = Math.min(window.devicePixelRatio || 1, 2);   // más que eso no se nota y gasta batería
+  function ajustar(entradas) {
+    // el tamaño que avisa el ResizeObserver (medirlo acá obligaba a recalcular toda la página: ~200 ms al abrir en
+    // un celular lento); si es el mismo de antes, no se rehace nada (achicar el lienzo lo borra y rearma las capas)
+    const r = (entradas && entradas[0] && entradas[0].contentRect) || lienzo.getBoundingClientRect();
+    const nuevoDpr = Math.min(window.devicePixelRatio || 1, 2);   // más que eso no se nota y gasta batería
+    if (r.width === ancho && r.height === alto && nuevoDpr === dpr && lienzo.width) return;
+    dpr = nuevoDpr;
     ancho = r.width;
     alto = r.height;
     lienzo.width = Math.round(ancho * dpr);
@@ -299,7 +303,8 @@ function crearReactor(canvasInicial) {
       }
       if (corriendo) return;
       corriendo = true;
-      ajustar();
+      // (sin medir acá: el tamaño lo avisa el ResizeObserver apenas la página está armada; medirlo al prender, con la
+      // página a medio armar, obligaba a calcularla toda de golpe: ~170 ms trabado al abrir en un celular lento)
       requestAnimationFrame(cuadro);
     },
     apagar() { corriendo = false; },

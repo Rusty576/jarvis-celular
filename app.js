@@ -15,7 +15,7 @@
 // ============================================================
 "use strict";
 
-const VERSION_APP = "2026.11.02.1";
+const VERSION_APP = "2026.11.03.1";
 const ANDROID_WEB = "https://rusty576.github.io/jarvis-celular/android/";   // el APK y su version.json
 const $ = (id) => document.getElementById(id);
 const Reco = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -100,6 +100,7 @@ let ultimaCharla = leerGuardado("ultimaCharla", null); // el último mensaje de 
 let datosDia = leerGuardado("dia", null);              // lo último de «Mi día» y la PC (se ve aunque no haya internet)
 let cola = leerGuardado("cola", []);                   // lo que pediste sin internet: sale solo cuando vuelve
 const ERRORES_DE_RED = ["sin_red", "tiempo", "servidor"];
+let estudiarAdjunto = false;   // si el archivo que elijas es para estudiar
 let finLocales = leerGuardado("fin_locales", []);   // los cambios de plata que el bot todavía no confirmó
 let vistaActual = "inicio";
 // (la Memoria: arriba, porque arrancar() corre antes de llegar a su sección)
@@ -1049,7 +1050,9 @@ async function miniaturaDe(blob, lado = 640) {
   const lienzo = document.createElement("canvas");
   lienzo.width = Math.round(img.naturalWidth * escala);
   lienzo.height = Math.round(img.naturalHeight * escala);
-  lienzo.getContext("2d").drawImage(img, 0, 0, lienzo.width, lienzo.height);
+  const c = lienzo.getContext("2d");
+  c.imageSmoothingQuality = "high";
+  c.drawImage(img, 0, 0, lienzo.width, lienzo.height);
   URL.revokeObjectURL(img.src);
   return lienzo.toDataURL("image/jpeg", lado > 400 ? 0.8 : 0.72);
 }
@@ -1247,7 +1250,20 @@ async function abrirVisor(m, i) {
   visor.m = m;
   visor.i = i;
   $("visor").hidden = false;
+  $("visor-foto").hidden = false;
+  $("visor-doc").hidden = true;
+  $("visor-botones").hidden = false;
   await mostrarEnVisor();
+}
+
+async function abrirDocVisor(url, nombre) {
+  $("visor").hidden = false;
+  $("visor-foto").hidden = true;
+  $("visor-doc").hidden = false;
+  $("visor-iframe").src = url;
+  $("visor-texto").textContent = nombre;
+  $("visor-barra").querySelector(".visor-cuenta").textContent = "";
+  $("visor-botones").hidden = true;
 }
 
 async function mostrarEnVisor() {
@@ -1268,6 +1284,10 @@ async function mostrarEnVisor() {
 function cerrarVisor() {
   $("visor").hidden = true;
   $("visor-img").src = "";
+  $("visor-iframe").src = "";
+  $("visor-foto").hidden = false;
+  $("visor-doc").hidden = true;
+  $("visor-botones").hidden = false;
   visor.m = null;
 }
 
@@ -2083,6 +2103,14 @@ async function pintarAlmacen(conArchivos) {
       datos.innerHTML = "<b></b><small></small>";
       datos.firstChild.textContent = a.nombre;
       datos.lastChild.textContent = new Date(a.fecha).toLocaleDateString("es") + " · " + (a.ruta || "").replace(/\/$/, "");
+      datos.style.cursor = "pointer";
+      datos.onclick = () => {
+        if (a.nombre.toLowerCase().endsWith(".pdf") || a.nombre.toLowerCase().endsWith(".txt")) {
+          abrirDocVisor(a.uri, a.nombre);
+        } else {
+          avisar("No puedo abrir este tipo de archivo en la app.");
+        }
+      };
       const tam = document.createElement("em");
       tam.textContent = gb(a.tam);
       fila.append(c, datos, tam);
@@ -2276,6 +2304,20 @@ function pintarMensaje(m, indice) {
   texto.className = "texto-msg" + (m.quien === "jarvis" ? " md" : "");
   texto.innerHTML = m.quien === "jarvis" ? markdown(m.texto || "") : m.quien === "vos" ? textoPlano(m.texto || "") : conFormato(m.texto || "");
   div.appendChild(texto);
+  if (m.tipo === "memoria_sugerida") {
+    const sug = document.createElement("div");
+    sug.className = "memoria-sugerida";
+    sug.innerHTML = `<p>💡 ${m.texto}</p><button class="boton principal">${m.boton || "Guardar en memoria"}</button>`;
+    sug.querySelector("button").onclick = () => mandar("Guardá esto en mi memoria: " + m.texto);
+    div.appendChild(sug);
+  }
+  if (m.tipo === "podcast") {
+    const pod = document.createElement("div");
+    pod.className = "tarjeta podcast";
+    pod.innerHTML = `<div class="est-tipo">🎙️ PODCAST</div><p>${m.texto || "Audio generado a partir de tus apuntes"}</p>
+      <audio controls src="${m.url}" style="width: 100%; margin-top: 10px;"></audio>`;
+    div.appendChild(pod);
+  }
   if (m.imagen) {   // (una foto que mandaste)
     const img = document.createElement("img");
     img.className = "foto";
@@ -3047,6 +3089,27 @@ function ponerAjustesBot(nuevos) {
   ajustesBot = nuevos;
   guardar("ajustesBot", ajustesBot);
   if ($("inicio-texto").textContent === saludo) $("inicio-texto").textContent = saludoInicial();
+  if ($("modo-tutor-charla")) $("modo-tutor-charla").value = ajustesBot.modoTutor || "directo";
+  if ($("modo-tutor-estudiar")) {
+    $("modo-tutor-estudiar").checked = ajustesBot.modoTutor === "socratico";
+    $("modo-tutor-label").textContent = ajustesBot.modoTutor === "socratico" ? "Modo Socrático" : "Modo Solucionador";
+  }
+}
+
+async function actualizarModoTutor(modo) {
+  if (!conexion) return;
+  ajustesBot.modoTutor = modo;
+  guardar("ajustesBot", ajustesBot);
+  try {
+    await api("app_ajustes", {modoTutor: modo});
+  } catch (e) {
+    console.error("Error actualizando modo tutor:", e);
+  }
+  if ($("modo-tutor-charla")) $("modo-tutor-charla").value = modo;
+  if ($("modo-tutor-estudiar")) {
+    $("modo-tutor-estudiar").checked = modo === "socratico";
+    $("modo-tutor-label").textContent = modo === "socratico" ? "Modo Socrático" : "Modo Solucionador";
+  }
 }
 
 async function sincronizarCharla(datos) {
@@ -3276,12 +3339,15 @@ async function prepararFoto(archivo) {
     const lienzo = document.createElement("canvas");
     lienzo.width = Math.round(imagen.naturalWidth * escala);
     lienzo.height = Math.round(imagen.naturalHeight * escala);
-    lienzo.getContext("2d").drawImage(imagen, 0, 0, lienzo.width, lienzo.height);
+    const c = lienzo.getContext("2d");
+    c.imageSmoothingQuality = "high";   // (con el «bajo» de fábrica, achicar una foto grande la dejaba serruchada)
+    c.drawImage(imagen, 0, 0, lienzo.width, lienzo.height);
     return lienzo.toDataURL("image/jpeg", calidad);
   };
   const grande = dibujar(1280, 0.85);
   URL.revokeObjectURL(imagen.src);
-  return {datos: grande.split(",")[1], miniatura: dibujar(220, 0.6)};
+  // la de la charla: 480 px al 80% (antes 220 al 60%: estirada en la pantalla se veía pixelada)
+  return {datos: grande.split(",")[1], miniatura: dibujar(480, 0.8)};
 }
 
 async function adjuntoALaPc() {
@@ -3948,6 +4014,7 @@ const ICONOS = {
   finanzas: '<rect x="3" y="6" width="18" height="13" rx="2.5"/><path d="M3 10h18M15.5 14.5h2.5"/>',
   estudiar: '<path d="M3 8l9-4 9 4-9 4-9-4z"/><path d="M7 10v5c0 1.7 2.2 3 5 3s5-1.3 5-3v-5M21 8v6"/>',
   memoria: '<circle cx="12" cy="12" r="2.2"/><circle cx="5" cy="6" r="1.6"/><circle cx="19" cy="6" r="1.6"/><circle cx="5" cy="18" r="1.6"/><circle cx="19" cy="18" r="1.6"/><path d="M6.3 7l4 3.6M17.7 7l-4 3.6M6.3 17l4-3.6M17.7 17l-4-3.6"/>',
+  cotizaciones: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><path d="M12 10v4M10 12h4"/>',
   boveda: '<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/>',
   juego: '<rect x="2" y="7" width="20" height="11" rx="5"/><path d="M7 10v4M5 12h4M15 11h.01M18 13h.01"/>',
 };
@@ -3966,6 +4033,7 @@ const PROTOCOLOS = [
   {id: "fotos", nombre: "Buscar fotos", hacer: () => preguntarYHacer("¿De qué querés ver fotos?", (t) => "Mostrame fotos de " + t)},
   {id: "finanzas", nombre: "Finanzas", hacer: () => cambiarVista("finanzas")},
   {id: "memoria", nombre: "Memoria", hacer: () => cambiarVista("memoria")},
+  {id: "cotizaciones", nombre: "Cotizaciones", hacer: () => cambiarVista("cotizaciones")},
   {id: "estudiar", nombre: "Estudiar", hacer: () => cambiarVista("estudiar")},
   {id: "almacen", nombre: "Almacenamiento", soloNativa: true, hacer: () => cambiarVista("almacen")},
   {id: "boveda", nombre: "Bóveda", soloNativa: true, hacer: () => cambiarVista("boveda")},
@@ -4250,7 +4318,7 @@ function fotoDeLaCamara() {
     lienzo.getContext("2d").drawImage(video, 0, 0, lienzo.width, lienzo.height);
     return lienzo.toDataURL("image/jpeg", calidad);
   };
-  return {datos: dibujar(1024, 0.8).split(",")[1], miniatura: dibujar(220, 0.6)};
+  return {datos: dibujar(1024, 0.8).split(",")[1], miniatura: dibujar(480, 0.8)};
 }
 
 async function miniaturaDeDatos(base64) {
@@ -5130,8 +5198,19 @@ async function buscarActualizacion(aMano) {
     v = r.ok ? JSON.parse(r.cuerpo) : null;
   } catch (e) { /* no se pudo leer */ }
   if (v && v.codigo > (Nativo.info.codigo || 0)) {
-    avisar(`Hay una versión nueva de JARVIS (${v.version}).`, 20,
-           {texto: "Actualizar", hacer: () => abrirUrl(ANDROID_WEB + (v.apk || "JARVIS.apk"))});
+    const url = ANDROID_WEB + (v.apk || "JARVIS.apk");
+    // los APK nuevos la bajan solos (revisan que sea la publicada) y avisan «Tocá para instalar»; los viejos, al navegador
+    const sola = typeof window.JarvisNativo.bajarActualizacion === "function" && v.sha256;
+    const estado = sola ? Nativo.ya("bajarActualizacion", url, v.sha256, v.version, v.codigo, ajustes.soloWifi !== false) : "";
+    if (estado === "lista") {
+      avisar(`La versión nueva de JARVIS (${v.version}) ya está bajada.`, 20,
+             {texto: "Instalar", hacer: () => Nativo.ya("instalarActualizacion") || abrirUrl(url)});
+    } else if (estado === "bajando") {
+      if (aMano) avisar(`Bajando la versión nueva (${v.version}): cuando esté, te aviso para instalarla.`, 6);
+    } else {
+      avisar(`Hay una versión nueva de JARVIS (${v.version})` + (estado === "espera_wifi" ? ": la bajo sola con wifi." : "."),
+             20, {texto: "Actualizar", hacer: () => abrirUrl(url)});
+    }
   } else if (aMano) {
     avisar(v ? "Tenés la última versión." : "No pude ver si hay una versión nueva.", 3);
   }
@@ -5342,7 +5421,33 @@ function conectarBotones() {
   $("archivo").onchange = async () => {   // fotos, PDFs, audios, videos o textos: uno o varios
     const lista = [...$("archivo").files];
     $("archivo").value = "";   // (así se puede volver a elegir el mismo)
-    if (lista.length) await sumarArchivos(lista);
+    if (!lista.length) return;
+    if (estudiarAdjunto) {
+      estudiarAdjunto = false;
+      const adjunto = await prepararAdjunto(lista[0]);
+      if (!adjunto) return avisar("No pude abrir ese archivo.", 3);
+      const boton = $("est-nuevo").querySelector("button.principal");
+      if (boton) { boton.disabled = true; boton.textContent = "Armando el set…"; }
+      try {
+        const r = await api("app_estudio_crear", {tema: "Mis apuntes", archivo: adjunto,
+                                                   prompt: "Armame un quiz ESTRICTAMENTE basado en este texto",
+                                                   cantidad: Number($("est-cantidad").value) || 10}, 85);
+        if (!r.ok) throw new Error(r.error || "No pude.");
+        estudio = estConLaCola(r.estudio);
+        guardar("estudio", estudio);
+        ["est-tema", "est-texto", "est-fecha"].forEach((id) => ($(id).value = ""));
+        $("est-doc").checked = false;
+        $("est-nuevo-caja").open = false;
+        pintarEstudio();
+        avisar(`Listo: «${r.set.titulo}», con ${r.set.preguntas.length} preguntas y ${r.set.tarjetas.length} tarjetas.`, 3);
+      } catch (e) {
+        avisar(e.message || "No pude.", 4);
+      } finally {
+        if (boton) { boton.disabled = false; boton.textContent = "Armar"; }
+      }
+    } else {
+      await sumarArchivos(lista);
+    }
   };
   $("foto-sacar").onclick = () => { sacarFoto(); ajustarCaja(); };
   $("adjunto-pc").onclick = adjuntoALaPc;
@@ -5693,6 +5798,19 @@ function arrancar() {
   if (new URLSearchParams(location.search).get("llamar")) {   // el atajo «Llamar» del ícono
     avisar("Tocá Llamar para empezar (el celular pide un toque antes de usar el micrófono).", 5);
   }
+  if ($("modo-tutor-charla")) {
+    $("modo-tutor-charla").value = ajustesBot ? ajustesBot.modoTutor : "directo";
+    $("modo-tutor-charla").onchange = () => actualizarModoTutor($("modo-tutor-charla").value);
+  }
+  if ($("modo-tutor-estudiar")) {
+    $("modo-tutor-estudiar").checked = ajustesBot && ajustesBot.modoTutor === "socratico";
+    $("modo-tutor-label").textContent = (ajustesBot && ajustesBot.modoTutor === "socratico") ? "Modo Socrático" : "Modo Solucionador";
+    $("modo-tutor-estudiar").onchange = () => actualizarModoTutor($("modo-tutor-estudiar").checked ? "socratico" : "directo");
+  }
+  if ($("est-usar-apuntes")) {
+    $("est-usar-apuntes").onclick = usarApuntesParaEstudio;
+  }
+  prepararCotizaciones();
 }
 
 arrancar();
@@ -6478,6 +6596,11 @@ function estSet(id) {
   return estudio && estudio.sets.find((s) => s.id === id);
 }
 
+async function usarApuntesParaEstudio() {
+  estudiarAdjunto = true;
+  $("archivo").click();
+}
+
 function pintarEstudio() {
   $("est-portada").hidden = false;
   $("est-sesion").hidden = true;
@@ -6675,20 +6798,23 @@ function estPregunta(caja, it) {
 function estFlash(caja, it) {
   const t = it.dato;
   caja.innerHTML = `<div class="est-tipo">TARJETA${t.tema ? " · " + escapar(t.tema).toUpperCase() : ""}</div>
-    <button class="est-flash"><span class="est-frente">${escapar(t.frente)}</span><span class="est-dorso" hidden>${escapar(t.dorso)}</span>
-    <small>Tocá para dar vuelta</small></button><div class="est-sino" hidden><button class="boton no">No la sabía</button>
-    <button class="boton principal si">La sabía</button></div>`;
-  const flash = caja.querySelector(".est-flash"), sino = caja.querySelector(".est-sino");
-  flash.onclick = () => {
-    flash.classList.toggle("vuelta");
-    const vuelta = flash.classList.contains("vuelta");
-    flash.querySelector(".est-frente").hidden = vuelta;
-    flash.querySelector(".est-dorso").hidden = !vuelta;
-    flash.querySelector("small").textContent = vuelta ? "¿La sabías?" : "Tocá para dar vuelta";
-    sino.hidden = false;
+    <div class="flashcard">
+      <div class="flashcard-inner">
+        <div class="flashcard-front">${escapar(t.frente)}</div>
+        <div class="flashcard-back">${escapar(t.dorso)}</div>
+      </div>
+    </div>
+    <div class="flash-botones" hidden>
+      <button class="boton repasar no">No la sabía</button>
+      <button class="boton principal sabia si">La sabía</button>
+    </div>`;
+  const card = caja.querySelector(".flashcard"), botones = caja.querySelector(".flash-botones");
+  card.onclick = () => {
+    card.classList.add("flipped");
+    botones.hidden = false;
   };
-  sino.querySelector(".si").onclick = () => { estAnotar(it, true); estSesion.i++; estMostrar(); };
-  sino.querySelector(".no").onclick = () => { estAnotar(it, false); estSesion.i++; estMostrar(); };
+  botones.querySelector(".si").onclick = () => { estAnotar(it, true); estSesion.i++; estMostrar(); };
+  botones.querySelector(".no").onclick = () => { estAnotar(it, false); estSesion.i++; estMostrar(); };
 }
 
 function estFinRonda() {
@@ -6817,6 +6943,16 @@ function prepararEstudio() {
   $("est-salir").onclick = () => {
     if (estSesion && estSesion.modo === "simulacro" && !estSesion.entregando && !confirm("¿Salís del simulacro? No se corrige.")) return;
     estSalir();
+  };
+}
+
+function prepararCotizaciones() {
+  $("cot-consultar").onclick = () => {
+    const monto = $("cot-monto").value, desde = $("cot-desde").value, hacia = $("cot-hacia").value;
+    const res = $("cot-resultado");
+    res.hidden = false;
+    res.textContent = "Consultando...";
+    procesarDichoDesdeToque(`¿Cuánto son ${monto} ${desde} en ${hacia}?`);
   };
 }
 

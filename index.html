@@ -114,6 +114,10 @@
       </button>
       <input id="archivo" type="file" multiple hidden
              accept="image/*,application/pdf,audio/*,video/*,text/*,.txt,.md,.csv,.json">
+      <select id="modo-tutor-charla" class="modo-tutor-select">
+        <option value="directo">Solucionador</option>
+        <option value="socratico">Socrático</option>
+      </select>
       <textarea id="caja" rows="1" placeholder="Escribile a JARVIS..." enterkeyhint="send"></textarea>
       <!-- Live (charlar manos libres, como Gemini Live): al lado del micrófono -->
       <button type="button" id="boton-llamar" class="icono-boton llamar-chat" aria-label="Live: charlar con JARVIS">
@@ -225,9 +229,39 @@
       de 2500 el 10 de cada mes», «pagué la luz», «¿cómo vengo con la plata?». Es lo mismo en los dos lados.</p>
   </section>
 
+  <!-- Cotizaciones: herramienta para ver el cambio de moneda -->
+  <section id="vista-cotizaciones" class="vista">
+    <div class="tarjeta">
+      <h2>COTIZACIONES</h2>
+      <div class="hoja-fila">
+        <select id="cot-desde" aria-label="Desde">
+          <option value="USD">Dólar (USD)</option>
+          <option value="EUR">Euro (EUR)</option>
+          <option value="ARS">Peso Arg (ARS)</option>
+        </select>
+        <span>→</span>
+        <select id="cot-hacia" aria-label="Hacia">
+          <option value="ARS" selected>Peso Arg (ARS)</option>
+          <option value="USD">Dólar (USD)</option>
+          <option value="EUR">Euro (EUR)</option>
+        </select>
+      </div>
+      <div class="fila-agregar">
+        <input id="cot-monto" type="number" placeholder="Monto" value="1" aria-label="Monto">
+        <button id="cot-consultar" class="boton principal">Consultar</button>
+      </div>
+      <div id="cot-resultado" class="est-resultado" hidden style="text-align: center; margin-top: 20px; font-size: 24px; font-weight: 700; color: var(--cian);"></div>
+    </div>
+    <p class="ayuda"> También por voz: «¿cuánto está el dólar?», «pasame 100 euros a pesos», «cotización del euro». </p>
+  </section>
+
   <!-- Estudiar (jarv2): sets con quiz, verdadero/falso, flashcards, repaso espaciado y simulacro -->
   <section id="vista-estudiar" class="vista">
     <div id="est-portada">
+      <label class="interruptor modo-tutor-estudiar">
+        <input type="checkbox" id="modo-tutor-estudiar">
+        <span id="modo-tutor-label">Modo Socrático</span>
+      </label>
       <div class="tarjeta est-hoy">
         <div class="est-cifras">
           <div><small>RACHA</small><b id="est-racha">0</b><span>días</span></div>
@@ -241,7 +275,10 @@
         <form id="est-nuevo" class="est-form" autocomplete="off">
           <input id="est-tema" placeholder="Tema (la Revolución Francesa, fracciones…)" aria-label="Tema">
           <textarea id="est-texto" rows="3" placeholder="…o pegá tus apuntes (opcional)" aria-label="Apuntes"></textarea>
-          <label class="est-check"><input type="checkbox" id="est-doc"> Del último documento o foto que le mandé</label>
+          <div class="hoja-fila">
+            <button type="button" id="est-usar-apuntes" class="boton">Usar mis apuntes</button>
+            <label class="est-check"><input type="checkbox" id="est-doc"> Del último documento o foto que le mandé</label>
+          </div>
           <div class="fila-agregar">
             <select id="est-cantidad" aria-label="Cuántas preguntas">
               <option value="5">5 preguntas</option><option value="10" selected>10 preguntas</option><option value="15">15 preguntas</option>
@@ -776,6 +813,9 @@
     <button type="button" id="visor-siguiente" class="visor-flecha der" aria-label="Siguiente">
       <svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg>
     </button>
+  </div>
+  <div id="visor-doc" class="visor-foto" hidden>
+    <iframe id="visor-iframe" style="width: 100%; height: 100%; border: none;"></iframe>
   </div>
   <p class="visor-texto" id="visor-texto"></p>
   <div class="visor-botones">
