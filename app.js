@@ -3273,6 +3273,16 @@ function tarjetaArchivo(nombre, info) {
   const d = document.createElement("small");
   d.textContent = [tipo[1] === "ARCH" ? "Archivo" : tipo[1], info && info.tam ? tamanoLindo(info.tam) : ""].filter(Boolean).join(" · ");
   datos.append(n, d);
+  if (info && info.uri) {
+    datos.style.cursor = "pointer";
+    datos.onclick = () => {
+      if (nombre.toLowerCase().endsWith(".pdf") || nombre.toLowerCase().endsWith(".txt")) {
+        abrirDocVisor(info.uri, nombre);
+      } else {
+        avisar("No puedo abrir este tipo de archivo en la app.");
+      }
+    };
+  }
   caja.append(icono, datos);
   return caja;
 }
