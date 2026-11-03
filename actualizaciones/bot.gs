@@ -2410,8 +2410,6 @@ function sistema_() {
       + "línea aparte así: [[recuerdo: el dato corto y en primera persona]] (como mucho 2; él lo revisa antes de que se "
       + "guarde, y no lo menciones). Nada de lo pasajero, de lo que dicen archivos o mails, ni claves. Si dice "
       + "«acordate que…», usá guardar_recuerdo.",
-    (prop_("MODO_TUTOR") === "socratico" ? "Modo Socrático: no des la respuesta; una pregunta guía por vez, confirmá lo que entendió, pista si se traba; al final que la diga él." :
-     prop_("MODO_TUTOR") === "directo" ? "Modo Solucionador: respuesta final primero, después los pasos numerados." : ""),
     MARCA_RECUERDOS + "\n" + recuerdos,
   ].filter(Boolean).join("\n");
 }

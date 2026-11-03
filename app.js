@@ -15,7 +15,7 @@
 // ============================================================
 "use strict";
 
-const VERSION_APP = "2026.11.03.1";
+const VERSION_APP = "2026.11.03.2";
 const ANDROID_WEB = "https://rusty576.github.io/jarvis-celular/android/";   // el APK y su version.json
 const $ = (id) => document.getElementById(id);
 const Reco = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -1251,19 +1251,8 @@ async function abrirVisor(m, i) {
   visor.i = i;
   $("visor").hidden = false;
   $("visor-foto").hidden = false;
-  $("visor-doc").hidden = true;
   $("visor-botones").hidden = false;
   await mostrarEnVisor();
-}
-
-async function abrirDocVisor(url, nombre) {
-  $("visor").hidden = false;
-  $("visor-foto").hidden = true;
-  $("visor-doc").hidden = false;
-  $("visor-iframe").src = url;
-  $("visor-texto").textContent = nombre;
-  $("visor-barra").querySelector(".visor-cuenta").textContent = "";
-  $("visor-botones").hidden = true;
 }
 
 async function mostrarEnVisor() {
@@ -1284,9 +1273,7 @@ async function mostrarEnVisor() {
 function cerrarVisor() {
   $("visor").hidden = true;
   $("visor-img").src = "";
-  $("visor-iframe").src = "";
   $("visor-foto").hidden = false;
-  $("visor-doc").hidden = true;
   $("visor-botones").hidden = false;
   visor.m = null;
 }
@@ -2103,14 +2090,6 @@ async function pintarAlmacen(conArchivos) {
       datos.innerHTML = "<b></b><small></small>";
       datos.firstChild.textContent = a.nombre;
       datos.lastChild.textContent = new Date(a.fecha).toLocaleDateString("es") + " · " + (a.ruta || "").replace(/\/$/, "");
-      datos.style.cursor = "pointer";
-      datos.onclick = () => {
-        if (a.nombre.toLowerCase().endsWith(".pdf") || a.nombre.toLowerCase().endsWith(".txt")) {
-          abrirDocVisor(a.uri, a.nombre);
-        } else {
-          avisar("No puedo abrir este tipo de archivo en la app.");
-        }
-      };
       const tam = document.createElement("em");
       tam.textContent = gb(a.tam);
       fila.append(c, datos, tam);
@@ -2304,20 +2283,6 @@ function pintarMensaje(m, indice) {
   texto.className = "texto-msg" + (m.quien === "jarvis" ? " md" : "");
   texto.innerHTML = m.quien === "jarvis" ? markdown(m.texto || "") : m.quien === "vos" ? textoPlano(m.texto || "") : conFormato(m.texto || "");
   div.appendChild(texto);
-  if (m.tipo === "memoria_sugerida") {
-    const sug = document.createElement("div");
-    sug.className = "memoria-sugerida";
-    sug.innerHTML = `<p>💡 ${m.texto}</p><button class="boton principal">${m.boton || "Guardar en memoria"}</button>`;
-    sug.querySelector("button").onclick = () => mandar("Guardá esto en mi memoria: " + m.texto);
-    div.appendChild(sug);
-  }
-  if (m.tipo === "podcast") {
-    const pod = document.createElement("div");
-    pod.className = "tarjeta podcast";
-    pod.innerHTML = `<div class="est-tipo">🎙️ PODCAST</div><p>${m.texto || "Audio generado a partir de tus apuntes"}</p>
-      <audio controls src="${m.url}" style="width: 100%; margin-top: 10px;"></audio>`;
-    div.appendChild(pod);
-  }
   if (m.imagen) {   // (una foto que mandaste)
     const img = document.createElement("img");
     img.className = "foto";
@@ -3089,27 +3054,6 @@ function ponerAjustesBot(nuevos) {
   ajustesBot = nuevos;
   guardar("ajustesBot", ajustesBot);
   if ($("inicio-texto").textContent === saludo) $("inicio-texto").textContent = saludoInicial();
-  if ($("modo-tutor-charla")) $("modo-tutor-charla").value = ajustesBot.modoTutor || "directo";
-  if ($("modo-tutor-estudiar")) {
-    $("modo-tutor-estudiar").checked = ajustesBot.modoTutor === "socratico";
-    $("modo-tutor-label").textContent = ajustesBot.modoTutor === "socratico" ? "Modo Socrático" : "Modo Solucionador";
-  }
-}
-
-async function actualizarModoTutor(modo) {
-  if (!conexion) return;
-  ajustesBot.modoTutor = modo;
-  guardar("ajustesBot", ajustesBot);
-  try {
-    await api("app_ajustes", {modoTutor: modo});
-  } catch (e) {
-    console.error("Error actualizando modo tutor:", e);
-  }
-  if ($("modo-tutor-charla")) $("modo-tutor-charla").value = modo;
-  if ($("modo-tutor-estudiar")) {
-    $("modo-tutor-estudiar").checked = modo === "socratico";
-    $("modo-tutor-label").textContent = modo === "socratico" ? "Modo Socrático" : "Modo Solucionador";
-  }
 }
 
 async function sincronizarCharla(datos) {
@@ -3273,16 +3217,6 @@ function tarjetaArchivo(nombre, info) {
   const d = document.createElement("small");
   d.textContent = [tipo[1] === "ARCH" ? "Archivo" : tipo[1], info && info.tam ? tamanoLindo(info.tam) : ""].filter(Boolean).join(" · ");
   datos.append(n, d);
-  if (info && info.uri) {
-    datos.style.cursor = "pointer";
-    datos.onclick = () => {
-      if (nombre.toLowerCase().endsWith(".pdf") || nombre.toLowerCase().endsWith(".txt")) {
-        abrirDocVisor(info.uri, nombre);
-      } else {
-        avisar("No puedo abrir este tipo de archivo en la app.");
-      }
-    };
-  }
   caja.append(icono, datos);
   return caja;
 }
@@ -5808,19 +5742,6 @@ function arrancar() {
   if (new URLSearchParams(location.search).get("llamar")) {   // el atajo «Llamar» del ícono
     avisar("Tocá Llamar para empezar (el celular pide un toque antes de usar el micrófono).", 5);
   }
-  if ($("modo-tutor-charla")) {
-    $("modo-tutor-charla").value = ajustesBot ? ajustesBot.modoTutor : "directo";
-    $("modo-tutor-charla").onchange = () => actualizarModoTutor($("modo-tutor-charla").value);
-  }
-  if ($("modo-tutor-estudiar")) {
-    $("modo-tutor-estudiar").checked = ajustesBot && ajustesBot.modoTutor === "socratico";
-    $("modo-tutor-label").textContent = (ajustesBot && ajustesBot.modoTutor === "socratico") ? "Modo Socrático" : "Modo Solucionador";
-    $("modo-tutor-estudiar").onchange = () => actualizarModoTutor($("modo-tutor-estudiar").checked ? "socratico" : "directo");
-  }
-  if ($("est-usar-apuntes")) {
-    $("est-usar-apuntes").onclick = usarApuntesParaEstudio;
-  }
-  prepararCotizaciones();
 }
 
 arrancar();
@@ -6808,23 +6729,20 @@ function estPregunta(caja, it) {
 function estFlash(caja, it) {
   const t = it.dato;
   caja.innerHTML = `<div class="est-tipo">TARJETA${t.tema ? " · " + escapar(t.tema).toUpperCase() : ""}</div>
-    <div class="flashcard">
-      <div class="flashcard-inner">
-        <div class="flashcard-front">${escapar(t.frente)}</div>
-        <div class="flashcard-back">${escapar(t.dorso)}</div>
-      </div>
-    </div>
-    <div class="flash-botones" hidden>
-      <button class="boton repasar no">No la sabía</button>
-      <button class="boton principal sabia si">La sabía</button>
-    </div>`;
-  const card = caja.querySelector(".flashcard"), botones = caja.querySelector(".flash-botones");
-  card.onclick = () => {
-    card.classList.add("flipped");
-    botones.hidden = false;
+    <button class="est-flash"><span class="est-frente">${escapar(t.frente)}</span><span class="est-dorso" hidden>${escapar(t.dorso)}</span>
+    <small>Tocá para dar vuelta</small></button><div class="est-sino" hidden><button class="boton no">No la sabía</button>
+    <button class="boton principal si">La sabía</button></div>`;
+  const flash = caja.querySelector(".est-flash"), sino = caja.querySelector(".est-sino");
+  flash.onclick = () => {
+    flash.classList.toggle("vuelta");
+    const vuelta = flash.classList.contains("vuelta");
+    flash.querySelector(".est-frente").hidden = vuelta;
+    flash.querySelector(".est-dorso").hidden = !vuelta;
+    flash.querySelector("small").textContent = vuelta ? "¿La sabías?" : "Tocá para dar vuelta";
+    sino.hidden = false;
   };
-  botones.querySelector(".si").onclick = () => { estAnotar(it, true); estSesion.i++; estMostrar(); };
-  botones.querySelector(".no").onclick = () => { estAnotar(it, false); estSesion.i++; estMostrar(); };
+  sino.querySelector(".si").onclick = () => { estAnotar(it, true); estSesion.i++; estMostrar(); };
+  sino.querySelector(".no").onclick = () => { estAnotar(it, false); estSesion.i++; estMostrar(); };
 }
 
 function estFinRonda() {
@@ -6953,16 +6871,6 @@ function prepararEstudio() {
   $("est-salir").onclick = () => {
     if (estSesion && estSesion.modo === "simulacro" && !estSesion.entregando && !confirm("¿Salís del simulacro? No se corrige.")) return;
     estSalir();
-  };
-}
-
-function prepararCotizaciones() {
-  $("cot-consultar").onclick = () => {
-    const monto = $("cot-monto").value, desde = $("cot-desde").value, hacia = $("cot-hacia").value;
-    const res = $("cot-resultado");
-    res.hidden = false;
-    res.textContent = "Consultando...";
-    procesarDichoDesdeToque(`¿Cuánto son ${monto} ${desde} en ${hacia}?`);
   };
 }
 

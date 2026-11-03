@@ -229,32 +229,6 @@
       de 2500 el 10 de cada mes», «pagué la luz», «¿cómo vengo con la plata?». Es lo mismo en los dos lados.</p>
   </section>
 
-  <!-- Cotizaciones: herramienta para ver el cambio de moneda -->
-  <section id="vista-cotizaciones" class="vista">
-    <div class="tarjeta">
-      <h2>COTIZACIONES</h2>
-      <div class="hoja-fila">
-        <select id="cot-desde" aria-label="Desde">
-          <option value="USD">Dólar (USD)</option>
-          <option value="EUR">Euro (EUR)</option>
-          <option value="ARS">Peso Arg (ARS)</option>
-        </select>
-        <span>→</span>
-        <select id="cot-hacia" aria-label="Hacia">
-          <option value="ARS" selected>Peso Arg (ARS)</option>
-          <option value="USD">Dólar (USD)</option>
-          <option value="EUR">Euro (EUR)</option>
-        </select>
-      </div>
-      <div class="fila-agregar">
-        <input id="cot-monto" type="number" placeholder="Monto" value="1" aria-label="Monto">
-        <button id="cot-consultar" class="boton principal">Consultar</button>
-      </div>
-      <div id="cot-resultado" class="est-resultado" hidden style="text-align: center; margin-top: 20px; font-size: 24px; font-weight: 700; color: var(--cian);"></div>
-    </div>
-    <p class="ayuda"> También por voz: «¿cuánto está el dólar?», «pasame 100 euros a pesos», «cotización del euro». </p>
-  </section>
-
   <!-- Estudiar (jarv2): sets con quiz, verdadero/falso, flashcards, repaso espaciado y simulacro -->
   <section id="vista-estudiar" class="vista">
     <div id="est-portada">
@@ -813,9 +787,6 @@
     <button type="button" id="visor-siguiente" class="visor-flecha der" aria-label="Siguiente">
       <svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg>
     </button>
-  </div>
-  <div id="visor-doc" class="visor-foto" hidden>
-    <iframe id="visor-iframe" style="width: 100%; height: 100%; border: none;"></iframe>
   </div>
   <p class="visor-texto" id="visor-texto"></p>
   <div class="visor-botones">
